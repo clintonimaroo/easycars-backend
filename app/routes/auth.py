@@ -54,38 +54,40 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """
     Authenticate a user and return a JWT token
     """
+    print("Login endpoint hit")
     user = await UserModel.find_by_username_or_email(form_data.username)
-    
+    print("User found:", user)
     if not user:
+        print("User not found")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
     is_valid = await UserModel.verify_password(form_data.password, user.get("password"))
-    
+    print("Password valid:", is_valid)
     if not is_valid:
+        print("Invalid password")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
     # Create JWT token
     token_data = {
         "id": str(user.get("_id")),
         "username": user.get("username"),
         "role": user.get("role")
     }
-    
     access_token = create_access_token(token_data)
-    
-    return {
+    print("Access token created:", access_token)
+    response = {
         "access_token": access_token,
         "token_type": "bearer",
         "user": UserModel.format_user_response(user)
     }
+    print("Response:", response)
+    return response
 
 @router.get("/verify", response_model=Dict)
 async def verify_token(token: str):
