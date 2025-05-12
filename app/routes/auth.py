@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Dict, Optional
 from datetime import timedelta
@@ -13,7 +13,10 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 # Dependency to get current user
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
+    # Try to get token from header first, then from cookie
+    if not token:
+        token = request.cookies.get("auth_token")
     token_data = decode_token(token)
     if not token_data:
         raise HTTPException(
