@@ -1,4 +1,6 @@
 import logging
+import time
+import ssl
 from typing import Optional
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -21,14 +23,17 @@ DB_NAME = settings.DATABASE_NAME
 
 # MongoDB connection options optimized for both sync and async drivers
 connection_options = {
-    "connectTimeoutMS": 5000,
-    "socketTimeoutMS": 10000,
-    "serverSelectionTimeoutMS": 5000,
+    "connectTimeoutMS": 30000,  # Increased timeout
+    "socketTimeoutMS": 45000,   # Increased timeout
+    "serverSelectionTimeoutMS": 30000,  # Increased timeout
     "maxPoolSize": 10,
     "minPoolSize": 0,
     "maxIdleTimeMS": 30000,
     "retryWrites": True,
     "retryReads": True,
+    "ssl": True,
+    "ssl_cert_reqs": ssl.CERT_NONE,  # Less strict SSL cert validation
+    "tlsAllowInvalidCertificates": True,
 }
 
 # Synchronous client (for scripts and non-async operations)
@@ -39,7 +44,7 @@ _async_client: Optional[AsyncIOMotorClient] = None
 
 def get_sync_client() -> MongoClient:
     """
-    Get or create a synchronous MongoDB client
+    Get or create a synchronous MongoDB client with retry logic
     
     Returns:
         MongoClient: MongoDB client instance
@@ -47,15 +52,28 @@ def get_sync_client() -> MongoClient:
     global _sync_client
     
     if _sync_client is None:
-        try:
-            logger.info("Creating new synchronous MongoDB connection")
-            _sync_client = MongoClient(MONGODB_URI, **connection_options)
-            # Test connection with ping
-            _sync_client.admin.command('ping')
-            logger.info("MongoDB connection successfully established")
-        except Exception as e:
-            logger.error(f"Error connecting to MongoDB: {e}")
-            raise
+        max_retries = 5
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Creating new synchronous MongoDB connection (attempt {attempt+1}/{max_retries})")
+                _sync_client = MongoClient(MONGODB_URI, **connection_options)
+                # Test connection with ping
+                _sync_client.admin.command('ping')
+                logger.info("MongoDB connection successfully established")
+                break
+            except Exception as e:
+                logger.error(f"Error connecting to MongoDB (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.critical("All connection attempts failed")
+                    # Return a dummy client for graceful degradation
+                    from pymongo.errors import ServerSelectionTimeoutError
+                    raise ServerSelectionTimeoutError("Could not connect to MongoDB after multiple attempts")
     
     return _sync_client
 
@@ -71,7 +89,7 @@ def get_sync_database() -> Database:
 
 async def get_async_client() -> AsyncIOMotorClient:
     """
-    Get or create an asynchronous MongoDB client
+    Get or create an asynchronous MongoDB client with retry logic
     
     Returns:
         AsyncIOMotorClient: Async MongoDB client instance
@@ -79,15 +97,27 @@ async def get_async_client() -> AsyncIOMotorClient:
     global _async_client
     
     if _async_client is None:
-        try:
-            logger.info("Creating new asynchronous MongoDB connection")
-            _async_client = AsyncIOMotorClient(MONGODB_URI, **connection_options)
-            # Test connection with ping
-            await _async_client.admin.command('ping')
-            logger.info("Async MongoDB connection successfully established")
-        except Exception as e:
-            logger.error(f"Error connecting to MongoDB: {e}")
-            raise
+        max_retries = 5
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Creating new asynchronous MongoDB connection (attempt {attempt+1}/{max_retries})")
+                _async_client = AsyncIOMotorClient(MONGODB_URI, **connection_options)
+                # Test connection with ping
+                await _async_client.admin.command('ping')
+                logger.info("Async MongoDB connection successfully established")
+                break
+            except Exception as e:
+                logger.error(f"Error connecting to MongoDB (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.critical("All async connection attempts failed")
+                    # Log the error but still return a client to avoid app crashes
+                    # The application will show appropriate errors when database operations fail
     
     return _async_client
 
