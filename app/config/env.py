@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # MongoDB Connection
-    MONGODB_URI: str = "mongodb+srv://clinton:Kindness1234@cluster0.jxd72pf.mongodb.net/easycars?retryWrites=true&w=majority&tls=true&tlsAllowInvalidCertificates=true"
+    MONGODB_URI: str = "mongodb+srv://preciouskayili:hZNuireqDH2NKBZH@easycars.85zhfws.mongodb.net/?retryWrites=true&w=majority&appName=easycars"
     DATABASE_NAME: str = "easycars"
     
     # JWT Authentication
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     MONGODB_SOURCE_DB: str = ""
     
     # Service URLs
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "https://dashboard.easycarsllc.com"
     
     # AWS S3 Configuration (for document uploads)
     AWS_ACCESS_KEY_ID: str = ""
