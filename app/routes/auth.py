@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Dict, Optional
 from datetime import timedelta
+import logging
 
 from app.models.user import UserModel, UserCreate, UserResponse
 from app.utils.auth import create_access_token, decode_token
@@ -9,32 +10,58 @@ from app.utils.auth import create_access_token, decode_token
 # Create router
 router = APIRouter()
 
-# OAuth2 password bearer scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# OAuth2 password bearer scheme with auto error disabled to handle cookies as backup
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 # Dependency to get current user
-async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
-    # Try to get token from header first, then from cookie
+async def get_current_user(request: Request, token: Optional[str] = Depends(oauth2_scheme)):
+    """
+    Get the current authenticated user from token in header or cookie
+    """
+    logger.info(f"Getting current user. Token in header: {bool(token)}")
+    
+    # If no token in header, try to get from cookie
     if not token:
+        logger.info("No token in header, checking cookies")
         token = request.cookies.get("auth_token")
+        logger.info(f"Token in cookie: {bool(token)}")
+
+    # If still no token, authentication fails
+    if not token:
+        logger.warning("No authentication token found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Decode and validate token
     token_data = decode_token(token)
     if not token_data:
+        logger.warning("Invalid token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Get user from database
     user_id = token_data.get("id")
+    logger.info(f"Token valid for user ID: {user_id}")
     user = await UserModel.find_by_id(user_id)
     
     if not user:
+        logger.warning(f"User not found for ID: {user_id}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    logger.info(f"User authenticated: {user.get('username')}")
     return user
 
 @router.post("/register", response_model=Dict)
