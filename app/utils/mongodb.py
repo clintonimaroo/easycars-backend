@@ -31,9 +31,8 @@ connection_options = {
     "maxIdleTimeMS": 30000,
     "retryWrites": True,
     "retryReads": True,
-    "ssl": True,
-    "ssl_cert_reqs": ssl.CERT_NONE,  # Less strict SSL cert validation
-    "tlsAllowInvalidCertificates": True,
+    "tls": True,  # Use tls instead of ssl
+    "tlsAllowInvalidCertificates": True,  # For less strict cert validation
 }
 
 # Synchronous client (for scripts and non-async operations)
