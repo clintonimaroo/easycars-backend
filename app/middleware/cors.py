@@ -17,6 +17,8 @@ def setup_cors_middleware(app: FastAPI) -> None:
         settings.FRONTEND_URL,  # Frontend URL from settings
         "https://dashboard.easycarsllc.com",  # Production frontend
         "https://www.dashboard.easycarsllc.com",  # With www prefix
+        "https://www.api.easycarsllc.com",    # API with www prefix
+        "https://api.easycarsllc.com",        # API without www prefix
         "http://localhost:3000",  # Next.js default
         "http://localhost:3001",
         "http://127.0.0.1:3000",
