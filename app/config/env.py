@@ -1,6 +1,9 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    # Environment
+    ENVIRONMENT: str = "production"  # "development" or "production"
+    
     # MongoDB Connection
     MONGODB_URI: str = "mongodb+srv://preciouskayili:hZNuireqDH2NKBZH@easycars.85zhfws.mongodb.net/?retryWrites=true&w=majority&appName=easycars"
     DATABASE_NAME: str = "easycars"

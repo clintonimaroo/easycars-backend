@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Dict, Optional
 from datetime import timedelta
@@ -6,6 +6,7 @@ import logging
 
 from app.models.user import UserModel, UserCreate, UserResponse
 from app.utils.auth import create_access_token, decode_token
+from app.config.env import settings
 
 # Create router
 router = APIRouter()
@@ -80,29 +81,31 @@ async def register(user_data: UserCreate):
     return {"success": True, "user_id": result.get("user_id")}
 
 @router.post("/login")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
     """
     Authenticate a user and return a JWT token
     """
-    print("Login endpoint hit")
+    logger.info(f"Login attempt for user: {form_data.username}")
     user = await UserModel.find_by_username_or_email(form_data.username)
-    print("User found:", user)
+    
     if not user:
-        print("User not found")
+        logger.warning(f"Login failed: User not found: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
     is_valid = await UserModel.verify_password(form_data.password, user.get("password"))
-    print("Password valid:", is_valid)
+    
     if not is_valid:
-        print("Invalid password")
+        logger.warning(f"Login failed: Invalid password for user: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
     # Create JWT token
     token_data = {
         "id": str(user.get("_id")),
@@ -110,14 +113,29 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         "role": user.get("role")
     }
     access_token = create_access_token(token_data)
-    print("Access token created:", access_token)
-    response = {
+    logger.info(f"Access token created for user: {user.get('username')}")
+    
+    # Set cookie in the response
+    cookie_domain = ".easycarsllc.com" if settings.ENVIRONMENT == "production" else None
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        max_age=1800,  # 30 minutes in seconds
+        path="/",
+        domain=cookie_domain,
+        secure=True,
+        httponly=True,
+        samesite="none"
+    )
+    
+    user_response = UserModel.format_user_response(user)
+    logger.info(f"Login successful for user: {user.get('username')}")
+    
+    return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": UserModel.format_user_response(user)
+        "user": user_response
     }
-    print("Response:", response)
-    return response
 
 @router.get("/verify", response_model=Dict)
 async def verify_token(token: str):

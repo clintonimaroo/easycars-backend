@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.env import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 def setup_cors_middleware(app: FastAPI) -> None:
     """
@@ -9,14 +12,18 @@ def setup_cors_middleware(app: FastAPI) -> None:
     Args:
         app: FastAPI application instance
     """
-    # For production, you might want to restrict this to only your frontend domain
+    # Set up origins from environment and add common development origins
     origins = [
         settings.FRONTEND_URL,  # Frontend URL from settings
+        "https://dashboard.easycarsllc.com",  # Production frontend
+        "https://www.dashboard.easycarsllc.com",  # With www prefix
         "http://localhost:3000",  # Next.js default
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
     ]
+    
+    logger.info(f"Setting up CORS middleware with origins: {origins}")
     
     # Add CORS middleware
     app.add_middleware(
@@ -25,5 +32,9 @@ def setup_cors_middleware(app: FastAPI) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["Content-Disposition"],  # For file downloads
+        expose_headers=[
+            "Content-Disposition",   # For file downloads
+            "Authorization",         # For auth token
+            "Set-Cookie"             # For cookies
+        ],
     ) 
