@@ -28,6 +28,37 @@ class VehicleBase(BaseModel):
     features: List[str] = []
     images: List[str] = []
     documents: List[Dict] = []
+    # Additional fields
+    stockNo: Optional[str] = None
+    isNew: Optional[bool] = True
+    motorNo: Optional[str] = None
+    keyNo: Optional[str] = None
+    trunkNo: Optional[str] = None
+    modelNo: Optional[str] = None
+    intRoNo: Optional[str] = None
+    soldTo: Optional[str] = None
+    buyerAddress: Optional[str] = None
+    buyerCity: Optional[str] = None
+    buyerState: Optional[str] = None
+    buyerZip: Optional[str] = None
+    buyerPhone: Optional[str] = None
+    dateSold: Optional[str] = None
+    invoiceNo: Optional[str] = None
+    salesperson: Optional[str] = None
+    dateOfPurchase: Optional[str] = None
+    purchasedFrom: Optional[str] = None
+    sellerAddress: Optional[str] = None
+    sellerCity: Optional[str] = None
+    sellerState: Optional[str] = None
+    sellerZip: Optional[str] = None
+    titleNo: Optional[str] = None
+    licenseNo: Optional[str] = None
+    hasBillOfSale: Optional[bool] = False
+    hasTitleCertificate: Optional[bool] = False
+    hasOdometerCertification: Optional[bool] = False
+    hasPowerOfAttorney: Optional[bool] = False
+    hasContractSigned: Optional[bool] = False
+    hasBuyersGuide: Optional[bool] = False
 
 class VehicleCreate(VehicleBase):
     """Model for vehicle creation"""
@@ -47,6 +78,37 @@ class VehicleUpdate(BaseModel):
     features: Optional[List[str]] = None
     images: Optional[List[str]] = None
     documents: Optional[List[Dict]] = None
+    # Additional fields
+    stockNo: Optional[str] = None
+    isNew: Optional[bool] = None
+    motorNo: Optional[str] = None
+    keyNo: Optional[str] = None
+    trunkNo: Optional[str] = None
+    modelNo: Optional[str] = None
+    intRoNo: Optional[str] = None
+    soldTo: Optional[str] = None
+    buyerAddress: Optional[str] = None
+    buyerCity: Optional[str] = None
+    buyerState: Optional[str] = None
+    buyerZip: Optional[str] = None
+    buyerPhone: Optional[str] = None
+    dateSold: Optional[str] = None
+    invoiceNo: Optional[str] = None
+    salesperson: Optional[str] = None
+    dateOfPurchase: Optional[str] = None
+    purchasedFrom: Optional[str] = None
+    sellerAddress: Optional[str] = None
+    sellerCity: Optional[str] = None
+    sellerState: Optional[str] = None
+    sellerZip: Optional[str] = None
+    titleNo: Optional[str] = None
+    licenseNo: Optional[str] = None
+    hasBillOfSale: Optional[bool] = None
+    hasTitleCertificate: Optional[bool] = None
+    hasOdometerCertification: Optional[bool] = None
+    hasPowerOfAttorney: Optional[bool] = None
+    hasContractSigned: Optional[bool] = None
+    hasBuyersGuide: Optional[bool] = None
 
 class VehicleInDB(VehicleBase):
     """Model for vehicle in database"""
@@ -205,5 +267,36 @@ class VehicleModel:
             "documents": vehicle.get("documents", []),
             "created_at": vehicle.get("created_at"),
             "updated_at": vehicle.get("updated_at"),
-            "created_by": vehicle.get("created_by")
+            "created_by": vehicle.get("created_by"),
+            # Additional fields
+            "stockNo": vehicle.get("stockNo"),
+            "isNew": vehicle.get("isNew"),
+            "motorNo": vehicle.get("motorNo"),
+            "keyNo": vehicle.get("keyNo"),
+            "trunkNo": vehicle.get("trunkNo"),
+            "modelNo": vehicle.get("modelNo"),
+            "intRoNo": vehicle.get("intRoNo"),
+            "soldTo": vehicle.get("soldTo"),
+            "buyerAddress": vehicle.get("buyerAddress"),
+            "buyerCity": vehicle.get("buyerCity"),
+            "buyerState": vehicle.get("buyerState"),
+            "buyerZip": vehicle.get("buyerZip"),
+            "buyerPhone": vehicle.get("buyerPhone"),
+            "dateSold": vehicle.get("dateSold"),
+            "invoiceNo": vehicle.get("invoiceNo"),
+            "salesperson": vehicle.get("salesperson"),
+            "dateOfPurchase": vehicle.get("dateOfPurchase"),
+            "purchasedFrom": vehicle.get("purchasedFrom"),
+            "sellerAddress": vehicle.get("sellerAddress"),
+            "sellerCity": vehicle.get("sellerCity"),
+            "sellerState": vehicle.get("sellerState"),
+            "sellerZip": vehicle.get("sellerZip"),
+            "titleNo": vehicle.get("titleNo"),
+            "licenseNo": vehicle.get("licenseNo"),
+            "hasBillOfSale": vehicle.get("hasBillOfSale"),
+            "hasTitleCertificate": vehicle.get("hasTitleCertificate"),
+            "hasOdometerCertification": vehicle.get("hasOdometerCertification"),
+            "hasPowerOfAttorney": vehicle.get("hasPowerOfAttorney"),
+            "hasContractSigned": vehicle.get("hasContractSigned"),
+            "hasBuyersGuide": vehicle.get("hasBuyersGuide")
         }
