@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 import logging
-from app.routes import auth, users, vehicles, notifications, health
+from app.routes import auth, users, vehicles, notifications, health, customers
 from app.middleware.cors import setup_cors_middleware
 from app.utils.mongodb import get_async_client, close_async_connection
 
@@ -23,6 +23,7 @@ app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(vehicles.router, prefix="/inventory", tags=["Inventory"])
 app.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+app.include_router(customers.router, tags=["Customers"])
 
 @app.on_event("startup")
 async def startup_db_client():
