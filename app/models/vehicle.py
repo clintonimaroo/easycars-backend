@@ -185,7 +185,7 @@ class VehicleModel:
         return {"success": True, "vehicle_id": str(result.inserted_id)}
     
     @classmethod
-    async def update_vehicle(cls, vehicle_id: str, vehicle_data: VehicleUpdate) -> Dict:
+    async def update_vehicle(cls, vehicle_id: str, vehicle_data: Union[VehicleUpdate, Dict]) -> Dict:
         """Update a vehicle"""
         collection = await cls.get_collection()
         
@@ -195,7 +195,13 @@ class VehicleModel:
             return {"success": False, "error": "Vehicle not found"}
         
         # Prepare update document
-        update_data = {k: v for k, v in vehicle_data.dict(exclude_unset=True).items() if v is not None}
+        if isinstance(vehicle_data, dict):
+            # If vehicle_data is a dictionary, use it directly
+            update_data = {k: v for k, v in vehicle_data.items() if v is not None}
+        else:
+            # If vehicle_data is a VehicleUpdate object, use its dict method
+            update_data = {k: v for k, v in vehicle_data.dict(exclude_unset=True).items() if v is not None}
+        
         update_data["updated_at"] = datetime.utcnow()
         
         # Update vehicle
