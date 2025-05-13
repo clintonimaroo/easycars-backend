@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 import logging
-from app.routes import auth, users, vehicles, notifications, health, customers
+from app.routes import auth, users, vehicles, notifications, health, customers, documents
 from app.middleware.cors import setup_cors_middleware
 from app.utils.mongodb import get_async_client, close_async_connection
+from fastapi.staticfiles import StaticFiles
+import os
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -17,11 +22,17 @@ app = FastAPI(
 # Setup middlewares
 setup_cors_middleware(app)
 
+# Mount static files directory for uploads
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # Include routers
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(vehicles.router, prefix="/inventory", tags=["Inventory"])
+app.include_router(documents.router, prefix="/documents", tags=["Documents"])  # Main documents endpoint
+app.include_router(documents.router, prefix="/inventory/documents", tags=["Documents"])  # Legacy/compatibility endpoint
 app.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 app.include_router(customers.router, tags=["Customers"])
 

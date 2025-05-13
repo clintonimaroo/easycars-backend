@@ -31,7 +31,6 @@ async def list_customers(
     query = {}
     
     if search:
-        # Support searching by name, email, or phone
         query = {
             "$or": [
                 {"name": {"$regex": search, "$options": "i"}},
@@ -55,7 +54,6 @@ async def create_customer(customer: CustomerCreate = Body(...)):
     """
     customers_collection = await get_customer_collection()
     
-    # Check if customer already exists with same name and email/phone
     existing_query = {"$or": []}
     
     if customer.email:
@@ -73,8 +71,7 @@ async def create_customer(customer: CustomerCreate = Body(...)):
             )
     
     customer_dict = customer.model_dump(by_alias=True)
-    customer_dict["vehicles"] = []  # Initialize with empty list
-    
+    customer_dict["vehicles"] = [] 
     result = await customers_collection.insert_one(customer_dict)
     
     new_customer = await customers_collection.find_one({"_id": result.inserted_id})

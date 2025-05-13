@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+import os
 
 class Settings(BaseSettings):
     # Environment
@@ -25,9 +26,16 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "us-east-1"
     AWS_BUCKET_NAME: str = "easycars"
+    
+    # Cloudinary Configuration (for document uploads)
+    CLOUDINARY_CLOUD_NAME: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "kardusers")
+    CLOUDINARY_API_KEY: str = os.environ.get("CLOUDINARY_API_KEY", "KmUswGUuGJAttg45gGMIuFegh-Q")
+    CLOUDINARY_API_SECRET: str = os.environ.get("CLOUDINARY_API_SECRET", "your_cloudinary_api_secret")
+    CLOUDINARY_FOLDER: str = os.environ.get("CLOUDINARY_FOLDER", "easycars_documents")
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()
