@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Dict, List, Optional
 from bson import ObjectId
 import os
@@ -7,10 +7,11 @@ import shutil
 import uuid
 from datetime import datetime
 import logging
+import mimetypes
 
 from app.models.document import DocumentModel, DocumentCreate
 from app.routes.auth import get_current_user
-from app.utils.cloudinary import upload_file, delete_file
+from app.utils.gridfs_storage import upload_file_to_gridfs, get_file_from_gridfs, delete_file_from_gridfs
 
 # Create router
 router = APIRouter()
@@ -44,11 +45,20 @@ async def upload_documents(
             file_content = await document.read()
             logger.info(f"File content read, size: {len(file_content)} bytes")
             
-            # Upload to Cloudinary
-            upload_result = await upload_file(
+            # Add metadata for GridFS
+            metadata = {
+                "vehicleId": vehicleId,
+                "documentType": documentType,
+                "description": description,
+                "uploaded_by": user_id
+            }
+            
+            # Upload to GridFS
+            upload_result = await upload_file_to_gridfs(
                 file=file_content,
                 filename=document.filename,
-                folder=f"vehicles/{vehicleId}"
+                content_type=document.content_type,
+                metadata=metadata
             )
             
             if not upload_result["success"]:
@@ -59,7 +69,7 @@ async def upload_documents(
                     detail=error_msg
                 )
             
-            logger.info(f"File uploaded to Cloudinary: {upload_result['public_id']}")
+            logger.info(f"File uploaded to GridFS: {upload_result['file_id']}")
             
             try:
                 # Create document record
@@ -67,17 +77,12 @@ async def upload_documents(
                     "vehicleId": vehicleId,
                     "originalFilename": document.filename,
                     "fileType": document.content_type,
-                    "fileSize": upload_result["bytes"],
-                    "path": upload_result["secure_url"],
-                    "public_id": upload_result["public_id"],
-                    "resource_type": upload_result["resource_type"],
+                    "fileSize": upload_result["size"],
+                    "file_id": upload_result["file_id"],
+                    "path": upload_result["url"],
                     "documentType": documentType,
                     "description": description
                 }
-                
-                # Add format if available
-                if "format" in upload_result:
-                    document_data["format"] = upload_result["format"]
                 
                 logger.info(f"Creating document record with data: {document_data}")
                 
@@ -92,17 +97,17 @@ async def upload_documents(
                     uploaded_docs.append(formatted_doc)
                     logger.info(f"Document record created successfully: {result.get('document_id')}")
                 else:
-                    # If document record creation fails, delete the file from Cloudinary
-                    delete_result = delete_file(upload_result["public_id"], upload_result["resource_type"])
-                    logger.error(f"Failed to create document record. Cloudinary cleanup result: {delete_result}")
+                    # If document record creation fails, delete the file from GridFS
+                    delete_result = await delete_file_from_gridfs(upload_result["file_id"])
+                    logger.error(f"Failed to create document record. GridFS cleanup result: {delete_result}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"Failed to create document record for {document.filename}"
                     )
             except Exception as e:
-                # If creating document record fails, delete the file from Cloudinary
-                delete_result = delete_file(upload_result["public_id"], upload_result["resource_type"])
-                logger.error(f"Exception creating document record: {str(e)}. Cloudinary cleanup result: {delete_result}")
+                # If creating document record fails, delete the file from GridFS
+                delete_result = await delete_file_from_gridfs(upload_result["file_id"])
+                logger.error(f"Exception creating document record: {str(e)}. GridFS cleanup result: {delete_result}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Failed to create document record for {document.filename}: {str(e)}"
@@ -187,6 +192,74 @@ async def get_document(
     
     return {"document": DocumentModel.format_document_response(document)}
 
+@router.get("/download/{file_id}")
+async def download_file(file_id: str):
+    """
+    Download a file from GridFS by its ID
+    """
+    try:
+        # Get file from GridFS
+        file_data = await get_file_from_gridfs(file_id)
+        
+        if not file_data or not file_data.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        # Prepare content disposition
+        content_disposition = f'attachment; filename="{file_data["original_filename"]}"'
+        
+        # Return streaming response
+        return StreamingResponse(
+            iter([file_data["content"]]),
+            media_type=file_data["content_type"],
+            headers={
+                "Content-Disposition": content_disposition,
+                "Content-Length": str(file_data["length"])
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file {file_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download file: {str(e)}"
+        )
+
+@router.get("/preview/{file_id}")
+async def preview_file(file_id: str):
+    """
+    Preview a file from GridFS by its ID
+    """
+    try:
+        # Get file from GridFS
+        file_data = await get_file_from_gridfs(file_id)
+        
+        if not file_data or not file_data.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        # Prepare content disposition for inline display
+        content_disposition = f'inline; filename="{file_data["original_filename"]}"'
+        
+        # Return streaming response
+        return StreamingResponse(
+            iter([file_data["content"]]),
+            media_type=file_data["content_type"],
+            headers={
+                "Content-Disposition": content_disposition,
+                "Content-Length": str(file_data["length"])
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error previewing file {file_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview file: {str(e)}"
+        )
+
 @router.delete("/{document_id}", response_model=Dict)
 async def delete_document(
     document_id: str,
@@ -219,13 +292,10 @@ async def delete_document(
             detail=result.get("error", "Failed to delete document")
         )
     
-    # Delete file from Cloudinary if public_id exists
-    if document.get("public_id"):
-        delete_result = delete_file(
-            document["public_id"], 
-            document.get("resource_type", "auto")
-        )
+    # Delete file from GridFS if file_id exists
+    if document.get("file_id"):
+        delete_result = await delete_file_from_gridfs(document["file_id"])
         if not delete_result["success"]:
-            print(f"Warning: Failed to delete file from Cloudinary: {delete_result.get('error')}")
+            logger.warning(f"Failed to delete file from GridFS: {delete_result.get('error')}")
     
     return {"success": True, "document_id": document_id} 

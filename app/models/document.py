@@ -1,9 +1,23 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Annotated, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from bson import ObjectId
 from app.utils.mongodb import get_async_database, get_sync_database
-from app.models.user import PyObjectId
+
+class PyObjectId(ObjectId):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not ObjectId.is_valid(v):
+            raise ValueError("Invalid ObjectId")
+        return ObjectId(v)
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, _schema_generator, _field_schema):
+        return {"type": "string"}
 
 class DocumentBase(BaseModel):
     """Base model for Document data"""
@@ -11,10 +25,8 @@ class DocumentBase(BaseModel):
     originalFilename: str
     fileType: str
     fileSize: int
-    path: str
-    public_id: str
-    resource_type: str
-    format: Optional[str] = None
+    file_id: str  # GridFS file ID
+    path: str  # URL path for accessing the file
     documentType: Optional[str] = None  # e.g., "bill_of_sale", "title_certificate", etc.
     description: Optional[str] = None
 
@@ -24,10 +36,8 @@ class DocumentCreate(BaseModel):
     originalFilename: str
     fileType: str
     fileSize: int
+    file_id: str
     path: str
-    public_id: str
-    resource_type: str
-    format: Optional[str] = None
     documentType: Optional[str] = None
     description: Optional[str] = None
 
@@ -39,7 +49,7 @@ class DocumentInDB(DocumentBase):
     created_by: Optional[str] = None
     
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
 
@@ -51,7 +61,7 @@ class DocumentResponse(DocumentBase):
     created_by: Optional[str] = None
     
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
 
@@ -91,7 +101,7 @@ class DocumentModel:
         
         # Prepare document
         document_doc = {
-            **document_data.dict(),
+            **document_data.model_dump(),
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
             "created_by": user_id
@@ -126,11 +136,9 @@ class DocumentModel:
             "originalFilename": document["originalFilename"],
             "fileType": document.get("fileType", ""),
             "fileSize": document.get("fileSize", 0),
+            "file_id": document.get("file_id", ""),
             "path": document.get("path", ""),
             "url": document.get("path", ""),
-            "public_id": document.get("public_id", ""),
-            "resource_type": document.get("resource_type", ""),
-            "format": document.get("format", ""),
             "documentType": document.get("documentType"),
             "description": document.get("description"),
             "created_at": document["created_at"],

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     
     # Service URLs
     FRONTEND_URL: str = "https://dashboard.easycarsllc.com"
+    API_URL: str = os.environ.get("API_URL", "http://localhost:8000")
     
     # AWS S3 Configuration (for document uploads)
     AWS_ACCESS_KEY_ID: str = ""
