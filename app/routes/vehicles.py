@@ -143,6 +143,11 @@ async def get_vehicles(
         "vehicles": [VehicleModel.format_vehicle_response(v) for v in vehicles]
     }
 
+@router.get("/counts", response_model=Dict[str, int])
+async def get_inventory_counts(current_user: Dict = Depends(get_current_user)):
+    return await VehicleModel.get_inventory_counts()
+
+
 @router.get("/{vehicle_id}", response_model=Dict)
 async def get_vehicle(
     vehicle_id: str,

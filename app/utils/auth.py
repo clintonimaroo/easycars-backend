@@ -1,6 +1,6 @@
 import jwt
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Union
 import logging
 
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 # Get JWT settings from config
 JWT_SECRET = settings.SECRET_KEY
 JWT_ALGORITHM = settings.ALGORITHM
-ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
 def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -28,16 +27,13 @@ def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -
     """
     to_encode = data.copy()
     
-    # Set expiration time
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    now = datetime.now(timezone.utc)
+    lifetime = expires_delta if expires_delta is not None else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
     # Add standard JWT claims
     to_encode.update({
-        "exp": expire,
-        "iat": datetime.utcnow(),
+        "exp": now + lifetime,
+        "iat": now,
         "sub": str(data.get("id", ""))
     })
     
@@ -78,4 +74,4 @@ def is_token_valid(token: str) -> bool:
     Returns:
         bool: True if token is valid, False otherwise
     """
-    return decode_token(token) is not None 
+    return decode_token(token) is not None

@@ -1,3 +1,4 @@
+from pydantic import Field, PositiveInt
 from pydantic_settings import BaseSettings
 import os
 
@@ -6,13 +7,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"  # "development" or "production"
     
     # MongoDB Connection
-    MONGODB_URI: str = "mongodb+srv://preciouskayili:hZNuireqDH2NKBZH@easycars.85zhfws.mongodb.net/?retryWrites=true&w=majority&appName=easycars"
+    MONGODB_URI: str = Field(min_length=1)
     DATABASE_NAME: str = "easycars"
+    MONGODB_TLS: bool = True
     
     # JWT Authentication
-    SECRET_KEY: str = "e3264125dff3c5f737092ca8510d5b8b214e64ee295252e1700e260136f7ca79"
+    SECRET_KEY: str = Field(min_length=1)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: PositiveInt = 480
     
     # For Migration
     MONGODB_SOURCE_URI: str = ""
@@ -21,6 +23,13 @@ class Settings(BaseSettings):
     # Service URLs
     FRONTEND_URL: str = "https://dashboard.easycarsllc.com"
     API_URL: str = os.environ.get("API_URL", "http://localhost:8000")
+
+    WOOCOMMERCE_STORE_URL: str = ""
+    WOOCOMMERCE_CONSUMER_KEY: str = ""
+    WOOCOMMERCE_CONSUMER_SECRET: str = ""
+    WOOCOMMERCE_ALLOWED_USER_IDS: str = ""
+    WORDPRESS_USERNAME: str = ""
+    WORDPRESS_APPLICATION_PASSWORD: str = ""
     
     # AWS S3 Configuration (for document uploads)
     AWS_ACCESS_KEY_ID: str = ""
@@ -37,6 +46,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        hide_input_in_errors = True
 
 
 settings = Settings()

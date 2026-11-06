@@ -250,6 +250,17 @@ class VehicleModel:
         # Execute query
         cursor = collection.find(query).skip(skip).limit(limit).sort("created_at", -1)
         return await cursor.to_list(length=limit)
+
+    @classmethod
+    async def get_inventory_counts(cls) -> Dict[str, int]:
+        collection = await cls.get_collection()
+        facets = {"all": [{"$count": "count"}]}
+        for status in (VehicleStatus.AVAILABLE, VehicleStatus.RESERVED, VehicleStatus.SOLD):
+            facets[status.value] = [{"$match": {"status": status.value}}, {"$count": "count"}]
+
+        results = await collection.aggregate([{"$facet": facets}]).to_list(length=1)
+        counts = results[0] if results else {}
+        return {name: counts[name][0]["count"] if counts.get(name) else 0 for name in facets}
     
     @classmethod
     def format_vehicle_response(cls, vehicle: Dict) -> Dict:

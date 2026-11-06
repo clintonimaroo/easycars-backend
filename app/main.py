@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 import logging
-from app.routes import auth, users, vehicles, notifications, health, customers, documents
+from app.routes import auth, users, vehicles, notifications, health, customers, documents, products, feedback
 from app.middleware.cors import setup_cors_middleware
 from app.utils.mongodb import get_async_client, close_async_connection
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +12,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+logging.getLogger("uvicorn.access").addFilter(feedback.FeedbackLogFilter())
+logging.getLogger("httpx").addFilter(feedback.FeedbackLogFilter())
 
 app = FastAPI(
     title="EasyCars API",
@@ -31,6 +33,8 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(vehicles.router, prefix="/inventory", tags=["Inventory"])
+app.include_router(products.router, prefix="/products", tags=["Products"])
+app.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])
 app.include_router(documents.router, prefix="/documents", tags=["Documents"])  # Main documents endpoint
 app.include_router(documents.router, prefix="/inventory/documents", tags=["Documents"])  # Legacy/compatibility endpoint
 app.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
@@ -56,4 +60,4 @@ async def shutdown_db_client():
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    return {"message": "Welcome to EasyCars API"} 
+    return {"message": "Welcome to EasyCars API"}

@@ -31,9 +31,11 @@ connection_options = {
     "maxIdleTimeMS": 30000,
     "retryWrites": True,
     "retryReads": True,
-    "tls": True,  # Use tls instead of ssl
-    "tlsAllowInvalidCertificates": True,  # For less strict cert validation
+    "tls": settings.MONGODB_TLS,  # Use tls instead of ssl
 }
+
+if settings.MONGODB_TLS:
+    connection_options["tlsAllowInvalidCertificates"] = True
 
 # Synchronous client (for scripts and non-async operations)
 _sync_client: Optional[MongoClient] = None
@@ -146,4 +148,4 @@ def close_sync_connection():
     if _sync_client:
         logger.info("Closing sync MongoDB connection")
         _sync_client.close()
-        _sync_client = None 
+        _sync_client = None

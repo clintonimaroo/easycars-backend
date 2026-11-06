@@ -112,28 +112,32 @@ async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depen
         "username": user.get("username"),
         "role": user.get("role")
     }
-    access_token = create_access_token(token_data)
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    access_token = create_access_token(token_data, expires_delta=timedelta(seconds=expires_in))
     logger.info(f"Access token created for user: {user.get('username')}")
     
     # Set cookie in the response
-    cookie_domain = ".easycarsllc.com" if settings.ENVIRONMENT == "production" else None
+    is_production = settings.ENVIRONMENT == "production"
+    cookie_domain = ".easycarsllc.com" if is_production else None
     response.set_cookie(
         key="auth_token",
         value=access_token,
-        max_age=1800,  # 30 minutes in seconds
+        max_age=expires_in,
         path="/",
         domain=cookie_domain,
-        secure=True,
-        httponly=True,
-        samesite="none"
+        secure=is_production,
+        httponly=is_production,
+        samesite="none" if is_production else "lax"
     )
     
+    response.headers["Cache-Control"] = "no-store"
     user_response = UserModel.format_user_response(user)
     logger.info(f"Login successful for user: {user.get('username')}")
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "expires_in": expires_in,
         "user": user_response
     }
 
