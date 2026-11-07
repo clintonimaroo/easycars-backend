@@ -73,7 +73,7 @@ async def run(db, user, turn, request, history, attachments, file_content, progr
     text = ""
     sources = []
     for step in range(settings.AGENT_MAX_TOOL_STEPS):
-        result = await agent_provider.complete(INSTRUCTIONS, input_items, tools=tools, model=settings.AGENT_PLANNER_MODEL)
+        result = await agent_provider.complete(INSTRUCTIONS, input_items, tools=tools, model=settings.AGENT_PLANNER_MODEL, max_output_tokens=12_000)
         sources.extend(result["sources"])
         if not result["calls"]:
             text = result["text"]
