@@ -236,11 +236,18 @@ async def _settle_turn(db, turn, status, error=None):
 
 
 def _payload_for_turn(turn):
-    return {
+    payload = {
         "request": turn["text"],
         "timezone": turn["timezone"],
         "current_time": turn["created_at"].isoformat() + ("Z" if turn["created_at"].tzinfo is None else ""),
     }
+    reply_to = turn.get("reply_to")
+    if reply_to:
+        payload["replying_to"] = {
+            "author": "the dealer" if reply_to.get("role") == "user" else "you, the agent",
+            "quoted_text": reply_to.get("text", ""),
+        }
+    return payload
 
 
 async def _history(db, turn):

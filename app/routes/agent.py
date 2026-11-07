@@ -52,12 +52,19 @@ class AgentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReplyReference(AgentInput):
+    turn_id: str = Field(max_length=80)
+    role: Literal["user", "agent"]
+    text: str = Field(max_length=600)
+
+
 class TurnInput(AgentInput):
     id: UUID
     text: str = Field(max_length=8000)
     attachment_ids: list[str] = Field(max_length=50)
     auto_approve: bool
     timezone: str = Field(max_length=64)
+    reply_to: ReplyReference | None = None
 
 
 class Decision(AgentInput):
@@ -125,7 +132,7 @@ def _key(user, turn_id):
 def _present(turn, previous=None):
     fields = (
         "id", "text", "auto_approve", "status", "stage", "attachments", "reply", "sources", "error",
-        "created_at", "work_started_at", "work_finished_at", "search_query", "reaction", "suggested_reply",
+        "created_at", "work_started_at", "work_finished_at", "search_query", "reaction", "suggested_reply", "reply_to",
     )
     result = {field: turn.get(field) for field in fields}
     result["attachments"] = agent_runtime.submitted_attachments(turn, previous)
@@ -305,11 +312,19 @@ async def create_turn(body: TurnInput, user=Depends(_agent_user), db=Depends(get
     if sum(item["size"] for item in attachments) > MAX_BATCH:
         raise HTTPException(413, "Attachments must total less than 150 MB per message.")
     key = _key(user, body.id)
+    reply_to = None
+    if body.reply_to is not None:
+        referenced = await db.agent_turns.find_one(
+            {"_id": _key(user, body.reply_to.turn_id), "owner": owner}, {"id": 1},
+        )
+        if not referenced:
+            raise HTTPException(404, "The message you are replying to could not be found.")
+        reply_to = {"turn_id": body.reply_to.turn_id, "role": body.reply_to.role, "text": " ".join(body.reply_to.text.split())[:600]}
     created_at = agent_runtime.now()
     turn = await db.agent_turns.find_one_and_update(
         {"_id": key},
         {"$setOnInsert": {
-            "owner": owner, "id": str(body.id), "text": text, "timezone": body.timezone,
+            "owner": owner, "id": str(body.id), "text": text, "timezone": body.timezone, "reply_to": reply_to,
             "attachments": attachments, "context_attachments": [], "auto_approve": body.auto_approve, "created_at": created_at,
             "work_started_at": created_at, "work_finished_at": None,
             "status": "queued", "stage": "Queued", "attempts": 0, "actions": [], "reply": "", "sources": [],
