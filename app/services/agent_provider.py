@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -90,22 +91,54 @@ def _headers():
     return {"Authorization": f"Bearer {key}"}
 
 
-async def _post(path, **kwargs):
+RETRY_DELAYS = (4, 10, 20)
+
+
+def _error_detail(response):
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(100, connect=10)) as client:
-            response = await client.post(f"{API_ROOT}/{path}", headers=_headers(), **kwargs)
+        error = response.json().get("error") or {}
+    except ValueError:
+        return "", ""
+    return str(error.get("code") or error.get("type") or ""), str(error.get("message") or "")[:200]
+
+
+async def _post(path, **kwargs):
+    attempt = 0
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
+                response = await client.post(f"{API_ROOT}/{path}", headers=_headers(), **kwargs)
+            if response.status_code == 429 or response.status_code >= 500:
+                code, detail = _error_detail(response)
+                if response.status_code == 429 and code == "insufficient_quota":
+                    raise AgentProviderError("The OpenAI account is out of credit. Add billing to the OpenAI project to continue.")
+                if attempt < len(RETRY_DELAYS):
+                    retry_after = response.headers.get("retry-after")
+                    delay = RETRY_DELAYS[attempt]
+                    if retry_after and retry_after.replace(".", "", 1).isdigit():
+                        delay = min(max(float(retry_after), 1), 60)
+                    attempt += 1
+                    logger.info("OpenAI %s, retrying in %ss (%s)", response.status_code, delay, code or "no code")
+                    await asyncio.sleep(delay)
+                    continue
+                if response.status_code == 429:
+                    raise AgentProviderError(f"OpenAI is rate limiting the agent right now. {detail or 'Try again in a minute.'}")
+                raise AgentProviderError("OpenAI could not complete the request. Try again.")
             response.raise_for_status()
             return response.json()
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in {401, 403}:
-            message = "The OpenAI connection rejected this request. Check the server configuration."
-        elif exc.response.status_code == 429:
-            message = "The agent reached its OpenAI limit. Try again after checking usage."
-        else:
-            message = "OpenAI could not complete the request. Try again."
-        raise AgentProviderError(message) from None
-    except (httpx.RequestError, ValueError):
-        raise AgentProviderError("The OpenAI connection did not respond. Try again.") from None
+        except httpx.HTTPStatusError as exc:
+            code, detail = _error_detail(exc.response)
+            if exc.response.status_code in {401, 403}:
+                message = "The OpenAI connection rejected this request. Check the server configuration."
+            elif exc.response.status_code == 404 and "model" in detail.lower():
+                message = f"OpenAI does not offer the configured model to this account. {detail}"
+            elif exc.response.status_code == 400:
+                message = f"OpenAI rejected the request. {detail or 'Try again.'}"
+            else:
+                message = "OpenAI could not complete the request. Try again."
+            raise AgentProviderError(message) from None
+        except (httpx.RequestError, ValueError):
+            raise AgentProviderError("The OpenAI connection did not respond. Try again.") from None
 
 
 async def responses(instructions, content, schema=None, search=False, model=None):
@@ -230,14 +263,40 @@ async def transcribe(data, name, mime):
     return value.strip()
 
 
+MODEL_IMAGE_EDGE = 1280
+
+
+def shrink_image(data, mime):
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return data, mime
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            if max(image.size) <= MODEL_IMAGE_EDGE and len(data) <= 600_000:
+                return data, mime
+            image.thumbnail((MODEL_IMAGE_EDGE, MODEL_IMAGE_EDGE))
+            buffer = io.BytesIO()
+            if mime == "image/png" and image.mode in {"RGBA", "LA", "P"}:
+                image.save(buffer, format="PNG", optimize=True)
+                return buffer.getvalue(), "image/png"
+            image.convert("RGB").save(buffer, format="JPEG", quality=82, optimize=True)
+            return buffer.getvalue(), "image/jpeg"
+    except Exception:
+        return data, mime
+
+
 def attachment_content(attachment, data):
     mime = attachment["type"]
     if mime in {"image/jpeg", "image/png", "image/webp", "application/pdf"}:
+        if mime != "application/pdf":
+            data, mime = shrink_image(data, mime)
         encoded = base64.b64encode(data).decode("ascii")
         url = f"data:{mime};base64,{encoded}"
         if mime == "application/pdf":
             return {"type": "input_file", "filename": attachment["name"], "file_data": url}
-        return {"type": "input_image", "image_url": url, "detail": "high"}
+        return {"type": "input_image", "image_url": url, "detail": "auto"}
     try:
         if mime == DOCX:
             with ZipFile(io.BytesIO(data)) as archive:
