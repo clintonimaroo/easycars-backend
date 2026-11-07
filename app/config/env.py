@@ -1,4 +1,4 @@
-from pydantic import Field, PositiveInt
+from pydantic import Field, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings
 import os
 
@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     WOOCOMMERCE_ALLOWED_USER_IDS: str = ""
     WORDPRESS_USERNAME: str = ""
     WORDPRESS_APPLICATION_PASSWORD: str = ""
+
+    OPENAI_API_KEY: SecretStr = SecretStr("")
+    AGENT_ENABLED: bool = False
+    AGENT_ALLOWED_USER_IDS: str = ""
+    DOCUMENTS_ADMIN_USER_IDS: str = ""
+    AGENT_MODEL: str = "gpt-5-mini"
+    AGENT_TRANSCRIBE_MODEL: str = "gpt-4o-mini-transcribe"
+    AGENT_ALLOW_VEHICLE_PHOTO_ANALYSIS: bool = False
+    AGENT_ALLOW_PRIVATE_FILE_INPUTS: bool = False
+    AGENT_WORKER_IN_WEB: bool = False
     
     # AWS S3 Configuration (for document uploads)
     AWS_ACCESS_KEY_ID: str = ""

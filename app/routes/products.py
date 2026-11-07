@@ -23,9 +23,13 @@ async def require_products_access(response: Response, current_user: Annotated[di
     require_store_access(response, current_user, "Products")
 
 
-def require_store_access(response, current_user, section):
+def has_private_signing_key():
     signing_key = settings.SECRET_KEY.strip().encode()
-    if len(signing_key) < 32 or sha256(signing_key).hexdigest() == LEGACY_SIGNING_KEY_FINGERPRINT:
+    return len(signing_key) >= 32 and sha256(signing_key).hexdigest() != LEGACY_SIGNING_KEY_FINGERPRINT
+
+
+def require_store_access(response, current_user, section):
+    if not has_private_signing_key():
         raise HTTPException(503, f"Configure a private EasyCars signing key to enable {section} access.")
 
     allowed_ids = {user_id.strip() for user_id in settings.WOOCOMMERCE_ALLOWED_USER_IDS.split(",")}

@@ -1,0 +1,213 @@
+import base64
+import io
+import json
+import logging
+import re
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
+
+import httpx
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app.config.env import settings
+
+API_ROOT = "https://api.openai.com/v1"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+SEARCH_OUTPUT_TOKENS = 6_500
+SEARCH_RETRY_OUTPUT_TOKENS = 12_000
+REPLY_MESSAGE_BREAK = "[[EASYCARS_MESSAGE_BREAK]]"
+SUGGESTED_REPLY_MARKER = "[[EASYCARS_SUGGESTED_REPLY]]"
+ANSWER_STYLE = (
+    " Write like a capable colleague talking to the dealer. Lead with the answer, the result, or the one thing "
+    "you need from them. Use the details they already provided and skip generic introductions and repeated recaps. "
+    "Make reasonable, reversible assumptions when they let you help immediately. State assumptions that affect the "
+    "result. Ask a focused follow-up only when the missing detail materially changes what you can do. Only offer "
+    "actions the app has tools for in this request. Web search alone cannot call or email anyone. Use one chat "
+    "message for a simple reply. For distinct ideas that read better separately, use up to three messages and put "
+    f"{REPLY_MESSAGE_BREAK} alone on the line "
+    "between them. Keep related findings, lists, and citations together within a message. If there is one useful "
+    f"read-only follow-up, place {SUGGESTED_REPLY_MARKER} on its own line after the reply, then write a single "
+    "draft message of at most 180 characters in the dealer's voice. Never suggest permission, sending, a purchase, "
+    "or any other action approval. Omit it if it would invent details or repeat private names, addresses, or identifiers."
+)
+SEARCH_ANSWER_STYLE = (
+    " Give the best findings first and put citations beside the findings they support. Aim for 300 words or fewer "
+    "unless the dealer asks for a detailed report. Skip repeated advice, source recaps, and unsolicited call scripts. "
+    "For local parts sourcing, treat a junkyard request as a preference for used OEM parts unless the dealer says "
+    "otherwise. Search for "
+    "specific parts and matching donor vehicles near the requested area. Start with a short, prioritized list of "
+    "possible replacements grounded in the supplied photo findings, if any. Separate visible damage from items "
+    "that need an in-person inspection. Then give the strongest actionable leads. For each, name the part or "
+    "donor vehicle, seller or yard, location, and listed price if shown. Cite the direct item or donor page when "
+    "available. Clearly distinguish confirmed part stock, donor vehicles, and general yard leads. Distinguish "
+    "shipping from local pickup. Before giving a listing price, saying a part is in stock, or recommending a trip, "
+    "open the exact item page and check price, availability, and the item pickup location. Seller headquarters, "
+    "search snippets, product overview pages, and substituted listings do not verify those facts. Label listings "
+    "you could not verify as unconfirmed leads. Describe self-service yards as self-service when the yard says so. "
+    "If new evidence changes an earlier finding, correct it directly and continue with useful leads. Give a subtotal "
+    "or range for priced items when the figures support it, and say which parts or fees are still unpriced. Use prices, "
+    "availability, and URLs supported by the sources. If useful leads are available now, give them before asking "
+    "for a VIN or other details to verify fit."
+)
+logger = logging.getLogger(__name__)
+
+_PERSONAL_DATA = re.compile(
+    r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"
+    r"|\b\d{3}-\d{2}-\d{4}\b"
+    r"|(?<!\d)(?:\+1[-. ]?)?(?:\(\d{3}\)|\d{3})[-. ]?\d{3}[-. ]?\d{4}(?!\d)"
+    r"|\b[A-HJ-NPR-Z0-9]{17}\b",
+    re.IGNORECASE,
+)
+
+
+class AgentProviderError(Exception):
+    pass
+
+
+def parse_reply(message):
+    suggestion_separator = rf"(?m)^[ \t]*{re.escape(SUGGESTED_REPLY_MARKER)}[ \t]*$"
+    reply, *suggestions = re.split(suggestion_separator, message or "", maxsplit=1)
+    suggestion = suggestions[0].strip() if suggestions else ""
+    if (
+        not 1 <= len(suggestion) <= 180 or len(suggestion.splitlines()) != 1
+        or _PERSONAL_DATA.search(suggestion) or re.search(r"(?:https?://|www\.)", suggestion, re.I)
+        or re.search(r"\b(?:approv\w*|authoriz\w*|send|submit|publish|buy|purchase|place a bid|delete|go ahead)\b", suggestion, re.I)
+    ):
+        suggestion = None
+    separator = rf"(?m)^[ \t]*{re.escape(REPLY_MESSAGE_BREAK)}[ \t]*$"
+    messages = [part.strip() for part in re.split(separator, reply) if part.strip()]
+    if len(messages) > 3:
+        messages = [*messages[:2], "\n\n".join(messages[2:])]
+    return messages, suggestion
+
+
+def _headers():
+    key = settings.OPENAI_API_KEY.get_secret_value().strip()
+    if not key:
+        raise AgentProviderError("The agent needs an OpenAI connection.")
+    return {"Authorization": f"Bearer {key}"}
+
+
+async def _post(path, **kwargs):
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(100, connect=10)) as client:
+            response = await client.post(f"{API_ROOT}/{path}", headers=_headers(), **kwargs)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            message = "The OpenAI connection rejected this request. Check the server configuration."
+        elif exc.response.status_code == 429:
+            message = "The agent reached its OpenAI limit. Try again after checking usage."
+        else:
+            message = "OpenAI could not complete the request. Try again."
+        raise AgentProviderError(message) from None
+    except (httpx.RequestError, ValueError):
+        raise AgentProviderError("The OpenAI connection did not respond. Try again.") from None
+
+
+async def responses(instructions, content, schema=None, search=False):
+    payload = {
+        "model": settings.AGENT_MODEL,
+        "instructions": instructions + " Use natural punctuation. Avoid em dashes in all user-facing text.",
+        "input": [{"role": "user", "content": content}],
+        "store": False,
+        "max_output_tokens": 6500 if schema else 2400,
+    }
+    if schema is not None:
+        payload["text"] = {"format": {
+            "name": schema.__name__,
+            "type": "json_schema",
+            "strict": True,
+            "schema": schema.model_json_schema(),
+        }}
+    else:
+        payload["instructions"] += ANSWER_STYLE
+    if search:
+        if schema is None:
+            payload["instructions"] += SEARCH_ANSWER_STYLE
+        payload["tools"] = [{"type": "web_search"}]
+        payload["tool_choice"] = "required"
+        payload["max_tool_calls"] = 3
+        payload["max_output_tokens"] = SEARCH_OUTPUT_TOKENS
+    result = await _post("responses", json=payload)
+    reason = (result.get("incomplete_details") or {}).get("reason")
+    if search and schema is None and result.get("status") == "incomplete" and reason == "max_output_tokens":
+        logger.info("Web search reached its output token limit. Retrying with a larger budget.")
+        result = await _post("responses", json={**payload, "max_output_tokens": SEARCH_RETRY_OUTPUT_TOKENS})
+        reason = (result.get("incomplete_details") or {}).get("reason")
+    if result.get("status") != "completed":
+        if result.get("status") == "incomplete" and reason == "max_output_tokens":
+            if search:
+                raise AgentProviderError("The web search reached its response limit. Try fewer parts or a smaller search area.")
+            raise AgentProviderError("The response reached its output limit. Try again with a smaller request.")
+        raise AgentProviderError("OpenAI could not complete the response. Try again.")
+    fragments, sources = [], {}
+    for item in result.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content", []):
+            if part.get("type") != "output_text":
+                continue
+            fragments.append(part.get("text", ""))
+            for annotation in part.get("annotations", []):
+                url = annotation.get("url", "")
+                if annotation.get("type") == "url_citation" and urlsplit(url).scheme in {"https", "http"}:
+                    sources[url] = {"url": url, "title": annotation.get("title") or url}
+    message = "\n".join(fragments).strip()
+    if not message:
+        raise AgentProviderError("The agent couldn't produce a response for this request.")
+    if schema is not None:
+        try:
+            return schema.model_validate_json(message)
+        except ValidationError:
+            raise AgentProviderError("The response could not be validated. Try again.") from None
+    return message, list(sources.values())[:16]
+
+
+async def transcribe(data, name, mime):
+    result = await _post(
+        "audio/transcriptions",
+        files={"file": (name, data, mime)},
+        data={"model": settings.AGENT_TRANSCRIBE_MODEL},
+    )
+    value = result.get("text")
+    if not isinstance(value, str) or not value.strip():
+        raise AgentProviderError("No clear speech was detected. Try recording again.")
+    return value.strip()
+
+
+def attachment_content(attachment, data):
+    mime = attachment["type"]
+    if mime in {"image/jpeg", "image/png", "image/webp", "application/pdf"}:
+        encoded = base64.b64encode(data).decode("ascii")
+        url = f"data:{mime};base64,{encoded}"
+        if mime == "application/pdf":
+            return {"type": "input_file", "filename": attachment["name"], "file_data": url}
+        return {"type": "input_image", "image_url": url, "detail": "high"}
+    try:
+        if mime == DOCX:
+            with ZipFile(io.BytesIO(data)) as archive:
+                entry = archive.getinfo("word/document.xml")
+                if entry.file_size > 1_000_000:
+                    raise ValueError
+                root = ElementTree.fromstring(archive.read(entry))
+                ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+                value = "\n".join("".join(node.itertext()) for node in root.iter(ns + "p"))
+        else:
+            value = data.decode("utf-8-sig")
+    except (UnicodeError, ValueError, KeyError, BadZipFile, ElementTree.ParseError):
+        raise HTTPException(422, "This document could not be read. Try a PDF or a UTF-8 text file.") from None
+    if len(value) > 120_000:
+        raise HTTPException(422, "This text document is too long. Split it into smaller files.")
+    return {"type": "input_text", "text": value}
+
+
+def public_query(value):
+    return _PERSONAL_DATA.sub("[private identifier removed]", value).strip()[:500]
+
+
+def text_content(value):
+    return [{"type": "input_text", "text": json.dumps(value, default=str, ensure_ascii=False)}]

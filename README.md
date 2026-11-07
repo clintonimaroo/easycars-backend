@@ -56,3 +56,10 @@ python scripts/db_migration.py --source-uri=<source-uri> --target-uri=<target-ur
 ```
 
 The migration script also reads configuration from `app/config/env.py` or your `.env` file.
+## Slizzy's Agent
+
+The dashboard uses the existing backend URL. On the backend, set `AGENT_ENABLED=true`, put the authorized EasyCars account IDs in the comma-separated `AGENT_ALLOWED_USER_IDS`, and set `OPENAI_API_KEY` in the service's secret environment. Optional `AGENT_MODEL` and `AGENT_TRANSCRIBE_MODEL` override the defaults. Set `AGENT_ALLOW_VEHICLE_PHOTO_ANALYSIS=true` to allow the agent to send attached images to OpenAI for parts research. The public web search receives text search terms and candidate part names. Leave `AGENT_ALLOW_PRIVATE_FILE_INPUTS` off until the OpenAI project's data retention policy has been reviewed for dealership paperwork.
+
+Run `python -m app.agent_worker` as a continuously running service with the same Mongo database and agent environment as the web API. For local development, `AGENT_WORKER_IN_WEB=true` starts the worker with the API. Historical sale imports and agent inventory creation with stock numbers require MongoDB transactions on a replica set. Copart time reminders appear in EasyCars notifications. Live lot updates require a separate authorized feed.
+
+Existing inventory document previews and downloads require a signed-in owner. To grant access to a trusted administrator for shared or legacy documents, set `DOCUMENTS_ADMIN_USER_IDS` to their EasyCars account IDs.

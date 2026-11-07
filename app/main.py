@@ -1,8 +1,13 @@
+import asyncio
+from contextlib import suppress
+
 from fastapi import FastAPI
 import logging
-from app.routes import auth, users, vehicles, notifications, health, customers, documents, products, feedback
+from app.routes import agent, auth, users, vehicles, notifications, health, customers, documents, products, feedback
 from app.middleware.cors import setup_cors_middleware
-from app.utils.mongodb import get_async_client, close_async_connection
+from app.utils.mongodb import get_async_client, get_async_database, close_async_connection
+from app.config.env import settings
+from app.services.agent_runtime import worker
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -29,6 +34,7 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Include routers
+app.include_router(agent.router, prefix="/agent", tags=["Agent"])
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
@@ -47,6 +53,8 @@ async def startup_db_client():
         logger.info("Initializing database connection")
         await get_async_client()
         logger.info("Database connection initialized successfully")
+        if settings.AGENT_ENABLED and settings.AGENT_WORKER_IN_WEB:
+            app.state.agent_worker = asyncio.create_task(worker(await get_async_database()))
     except Exception as e:
         logger.error(f"Failed to initialize database connection: {e}")
         # We don't raise the exception here to allow the app to start
@@ -56,6 +64,11 @@ async def startup_db_client():
 async def shutdown_db_client():
     """Close database connection on shutdown"""
     logger.info("Closing database connection")
+    task = getattr(app.state, "agent_worker", None)
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
     await close_async_connection()
 
 @app.get("/", tags=["Root"])

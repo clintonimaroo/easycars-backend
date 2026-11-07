@@ -51,8 +51,6 @@ async def upload_file_to_gridfs(
         Dict with upload result
     """
     try:
-        logger.info(f"Uploading file {filename} to GridFS")
-        
         # Get GridFS bucket
         fs = await get_gridfs_bucket()
         
@@ -84,8 +82,6 @@ async def upload_file_to_gridfs(
         )
         
         file_size = len(file_bytes)
-        logger.info(f"Successfully uploaded {filename} to GridFS. ID: {file_id}, Size: {file_size} bytes")
-        
         # Get API URL with fallback
         api_url = getattr(settings, 'API_URL', 'http://localhost:8000')
         
@@ -101,7 +97,7 @@ async def upload_file_to_gridfs(
             "content_type": content_type
         }
     except Exception as e:
-        logger.error(f"GridFS upload failed for {filename}: {str(e)}", exc_info=True)
+        logger.error("GridFS upload failed (%s)", type(e).__name__)
         return {
             "success": False,
             "error": str(e)
