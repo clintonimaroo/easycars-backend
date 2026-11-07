@@ -25,7 +25,7 @@ from app.utils.mongodb import get_async_database
 router = APIRouter()
 UPLOAD_AUDIENCE = "easycars-agent-upload"
 MAX_FILE = 18 * 1024 * 1024
-MAX_BATCH = 45 * 1024 * 1024
+MAX_BATCH = 150 * 1024 * 1024
 MAX_AUDIO = 4 * 1024 * 1024
 PRIVATE = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
 MIMES = {
@@ -302,7 +302,7 @@ async def create_turn(body: TurnInput, user=Depends(_agent_user), db=Depends(get
         raise HTTPException(404, "One of the selected attachments could not be found.")
     attachments = [by_id[item] for item in body.attachment_ids]
     if sum(item["size"] for item in attachments) > MAX_BATCH:
-        raise HTTPException(413, "Attachments must total less than 45 MB per message.")
+        raise HTTPException(413, "Attachments must total less than 150 MB per message.")
     key = _key(user, body.id)
     created_at = agent_runtime.now()
     turn = await db.agent_turns.find_one_and_update(
