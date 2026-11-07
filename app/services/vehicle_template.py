@@ -1,4 +1,5 @@
 from html import escape
+import re
 
 ICON_BASE = "https://dashboard.easycarsllc.com/images/product-details/v1/"
 PHONE_LINE = "For more information or to schedule a test drive, please call +1 (214)989 4804."
@@ -39,8 +40,27 @@ def _icon(name, size=28):
     )
 
 
+_DASHES = {"\u2014": " - ", "\u2013": "-", "\u2012": "-", "\u2015": " - "}
+_QUOTES = {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'}
+
+
+def plain_text(value):
+    if value is None:
+        return ""
+    text = str(value)
+    for char, plain in {**_DASHES, **_QUOTES}.items():
+        text = text.replace(char, plain)
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
+    text = re.sub(r"(?<!\w)[*_`](\S.*?)[*_`](?!\w)", r"\1", text)
+    text = re.sub(r"^\s*#{1,6}\s*", "", text)
+    text = text.replace("**", "").replace("`", "")
+    return " ".join(text.split())
+
+
 def _clean(value):
-    return " ".join(str(value).split()) if value is not None else ""
+    return plain_text(value)
 
 
 def _lines(value):

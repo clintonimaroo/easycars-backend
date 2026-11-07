@@ -16,7 +16,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config.env import settings
 from app.models.product import NewProduct
-from app.services.vehicle_template import FEATURE_GROUPS, SHORT_DESCRIPTION, SPECS, render_vehicle_description
+from app.services.vehicle_template import FEATURE_GROUPS, SHORT_DESCRIPTION, SPECS, plain_text, render_vehicle_description
 from app.routes.products import (
     MAX_IMAGE_SIZE,
     photo_format,
@@ -297,13 +297,17 @@ async def prepare_product(db, user, args, attachments):
         values.pop("sku")
     if values.get("stock_status") not in STOCK_LABELS:
         values.pop("stock_status", None)
-    specs = {key: args.get(key) for key, _, _ in SPECS if isinstance(args.get(key), str) and args.get(key).strip()}
+    if isinstance(values.get("name"), str):
+        values["name"] = plain_text(values["name"])
+    if isinstance(values.get("description"), str):
+        values["description"] = plain_text(values["description"])
+    specs = {key: plain_text(args.get(key)) for key, _, _ in SPECS if isinstance(args.get(key), str) and plain_text(args.get(key))}
     raw_features = args.get("features") if isinstance(args.get("features"), dict) else {}
     features = {
-        key: [item for item in raw_features.get(key, []) if isinstance(item, str) and item.strip()]
+        key: [plain_text(item) for item in raw_features.get(key, []) if isinstance(item, str) and plain_text(item)]
         for key, _, _ in FEATURE_GROUPS
     }
-    overview = [line for line in (args.get("overview") or []) if isinstance(line, str) and line.strip()]
+    overview = [plain_text(line) for line in (args.get("overview") or []) if isinstance(line, str) and plain_text(line)]
     templated = values.get("name") and "description" not in values and (specs or overview or any(features.values()))
     if templated:
         values["description"] = render_vehicle_description(values["name"], specs, features, overview)
