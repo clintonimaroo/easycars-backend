@@ -296,7 +296,7 @@ async def create_turn(body: TurnInput, user=Depends(_agent_user), db=Depends(get
     owner = str(user["_id"])
     records = await db["agent_uploads.files"].find({
         "_id": {"$in": [ObjectId(item) for item in body.attachment_ids]}, "metadata.owner": owner,
-    }).to_list(7)
+    }).to_list(len(body.attachment_ids))
     by_id = {str(record["_id"]): agent_runtime.attachment_view(record) for record in records}
     if len(by_id) != len(body.attachment_ids):
         raise HTTPException(404, "One of the selected attachments could not be found.")
