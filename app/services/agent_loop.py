@@ -72,8 +72,17 @@ async def run(db, user, turn, request, history, attachments, file_content, progr
     tools = agent_tools.definitions()
     text = ""
     sources = []
+    model = settings.AGENT_PLANNER_MODEL
     for step in range(settings.AGENT_MAX_TOOL_STEPS):
-        result = await agent_provider.complete(INSTRUCTIONS, input_items, tools=tools, model=settings.AGENT_PLANNER_MODEL, max_output_tokens=12_000)
+        try:
+            result = await agent_provider.complete(INSTRUCTIONS, input_items, tools=tools, model=model, max_output_tokens=12_000)
+        except agent_provider.AgentProviderError as error:
+            if not error.too_large or model == settings.AGENT_MODEL:
+                raise
+            logger.info("Planner request too large for %s, falling back to %s", model, settings.AGENT_MODEL)
+            model = settings.AGENT_MODEL
+            await progress("Switching to a lighter model")
+            result = await agent_provider.complete(INSTRUCTIONS, input_items, tools=tools, model=model, max_output_tokens=12_000)
         sources.extend(result["sources"])
         if not result["calls"]:
             text = result["text"]

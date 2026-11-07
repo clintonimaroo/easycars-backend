@@ -64,6 +64,10 @@ _PERSONAL_DATA = re.compile(
 
 
 class AgentProviderError(Exception):
+    def __init__(self, message, too_large=False):
+        super().__init__(message)
+        self.too_large = too_large
+
     pass
 
 
@@ -112,6 +116,8 @@ async def _post(path, **kwargs):
                 code, detail = _error_detail(response)
                 if response.status_code == 429 and code == "insufficient_quota":
                     raise AgentProviderError("The OpenAI account is out of credit. Add billing to the OpenAI project to continue.")
+                if response.status_code == 429 and "too large" in detail.lower():
+                    raise AgentProviderError(f"OpenAI is rate limiting the agent right now. {detail}", too_large=True)
                 if attempt < len(RETRY_DELAYS):
                     retry_after = response.headers.get("retry-after")
                     delay = RETRY_DELAYS[attempt]
@@ -122,7 +128,7 @@ async def _post(path, **kwargs):
                     await asyncio.sleep(delay)
                     continue
                 if response.status_code == 429:
-                    raise AgentProviderError(f"OpenAI is rate limiting the agent right now. {detail or 'Try again in a minute.'}")
+                    raise AgentProviderError(f"OpenAI is rate limiting the agent right now. {detail or 'Try again in a minute.'}", too_large="too large" in detail.lower())
                 raise AgentProviderError("OpenAI could not complete the request. Try again.")
             response.raise_for_status()
             return response.json()
@@ -296,7 +302,7 @@ def attachment_content(attachment, data):
         url = f"data:{mime};base64,{encoded}"
         if mime == "application/pdf":
             return {"type": "input_file", "filename": attachment["name"], "file_data": url}
-        return {"type": "input_image", "image_url": url, "detail": "auto"}
+        return {"type": "input_image", "image_url": url, "detail": "low"}
     try:
         if mime == DOCX:
             with ZipFile(io.BytesIO(data)) as archive:
