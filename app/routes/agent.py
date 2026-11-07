@@ -19,7 +19,10 @@ from app.config.env import settings
 from app.models.user import UserModel
 from app.routes.auth import get_current_user
 from app.routes.products import has_private_signing_key
-from app.services import agent_provider, agent_runtime
+import asyncio
+import json
+
+from app.services import agent_jobs, agent_memory, agent_provider, agent_runtime
 from app.utils.mongodb import get_async_database
 
 router = APIRouter()
@@ -133,6 +136,7 @@ def _present(turn, previous=None):
     fields = (
         "id", "text", "auto_approve", "status", "stage", "attachments", "reply", "sources", "error",
         "created_at", "work_started_at", "work_finished_at", "search_query", "reaction", "suggested_reply", "reply_to",
+        "job_id", "job_name",
     )
     result = {field: turn.get(field) for field in fields}
     result["attachments"] = agent_runtime.submitted_attachments(turn, previous)
@@ -198,6 +202,107 @@ async def read_turn_status(turn_id: UUID, user=Depends(_agent_user), db=Depends(
     if turn is None:
         raise HTTPException(404, "This task could not be found.")
     return {"turn": turn}
+
+
+class JobInput(AgentInput):
+    name: str = Field(max_length=80)
+    prompt: str = Field(max_length=4000)
+    schedule: str = Field(max_length=120)
+    timezone: str = Field(max_length=64)
+    auto_approve: bool = False
+
+
+class JobPatch(AgentInput):
+    name: str | None = Field(default=None, max_length=80)
+    prompt: str | None = Field(default=None, max_length=4000)
+    schedule: str | None = Field(default=None, max_length=120)
+    timezone: str | None = Field(default=None, max_length=64)
+    enabled: bool | None = None
+    auto_approve: bool | None = None
+
+
+@router.get("/jobs")
+async def list_jobs(user=Depends(_agent_user), db=Depends(get_async_database)):
+    return {"jobs": await agent_jobs.list_jobs(db, str(user["_id"]))}
+
+
+@router.post("/jobs", dependencies=[Depends(_write_header)], status_code=201)
+async def create_job(body: JobInput, user=Depends(_agent_user), db=Depends(get_async_database)):
+    return {"job": await agent_jobs.create_job(db, str(user["_id"]), body.model_dump())}
+
+
+@router.patch("/jobs/{job_id}", dependencies=[Depends(_write_header)])
+async def update_job(job_id: UUID, body: JobPatch, user=Depends(_agent_user), db=Depends(get_async_database)):
+    changes = body.model_dump(exclude_unset=True)
+    return {"job": await agent_jobs.update_job(db, str(user["_id"]), str(job_id), changes)}
+
+
+@router.delete("/jobs/{job_id}", dependencies=[Depends(_write_header)], status_code=204)
+async def delete_job(job_id: UUID, user=Depends(_agent_user), db=Depends(get_async_database)):
+    await agent_jobs.delete_job(db, str(user["_id"]), str(job_id))
+
+
+@router.get("/facts")
+async def list_facts(user=Depends(_agent_user), db=Depends(get_async_database)):
+    return {"facts": await agent_memory.recent_facts(db, str(user["_id"]), limit=200)}
+
+
+@router.delete("/facts/{fact_id}", dependencies=[Depends(_write_header)], status_code=204)
+async def delete_fact(fact_id: str, user=Depends(_agent_user), db=Depends(get_async_database)):
+    if not ObjectId.is_valid(fact_id):
+        raise HTTPException(404, "That note was not found.")
+    removed = await agent_memory.forget(db, str(user["_id"]), fact_id=ObjectId(fact_id))
+    if not removed:
+        raise HTTPException(404, "That note was not found.")
+
+
+@router.get("/audit")
+async def list_audit(limit: int = Query(50, ge=1, le=200), user=Depends(_agent_user), db=Depends(get_async_database)):
+    cursor = db[agent_memory.AUDIT].find({"owner": str(user["_id"])}, {"_id": 0, "owner": 0}).sort("created_at", -1).limit(limit)
+    entries = []
+    async for item in cursor:
+        item["created_at"] = item["created_at"].isoformat()
+        entries.append(item)
+    return {"entries": entries}
+
+
+def _event_view(turn, previous=None):
+    presented = _present(turn, previous)
+    return {key: presented[key] for key in (
+        "id", "status", "stage", "reply", "reply_messages", "progress_messages", "actions", "sources", "error",
+        "work_finished_at", "suggested_reply",
+    ) if key in presented}
+
+
+@router.get("/turns/{turn_id}/events")
+async def stream_turn_events(turn_id: UUID, user=Depends(_agent_user), db=Depends(get_async_database)):
+    key = _key(user, turn_id)
+    owner = str(user["_id"])
+
+    async def events():
+        last = None
+        idle = 0
+        yield "retry: 2000\n\n"
+        while idle < 1200:
+            turn = await db.agent_turns.find_one({"_id": key, "owner": owner})
+            if turn is None:
+                yield "event: gone\ndata: {}\n\n"
+                return
+            view = _event_view(turn)
+            encoded = json.dumps(view, default=str, ensure_ascii=False)
+            if encoded != last:
+                last = encoded
+                yield f"event: turn\ndata: {encoded}\n\n"
+            if turn.get("status") not in {"queued", "running"}:
+                yield "event: done\ndata: {}\n\n"
+                return
+            idle += 1
+            await asyncio.sleep(0.5)
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no", "Connection": "keep-alive",
+    })
 
 
 @router.patch("/memory", dependencies=[Depends(_write_header)])

@@ -108,9 +108,9 @@ async def _post(path, **kwargs):
         raise AgentProviderError("The OpenAI connection did not respond. Try again.") from None
 
 
-async def responses(instructions, content, schema=None, search=False):
+async def responses(instructions, content, schema=None, search=False, model=None):
     payload = {
-        "model": settings.AGENT_MODEL,
+        "model": model or settings.AGENT_MODEL,
         "instructions": instructions + " Use natural punctuation. Avoid em dashes in all user-facing text.",
         "input": [{"role": "user", "content": content}],
         "store": False,
@@ -165,6 +165,56 @@ async def responses(instructions, content, schema=None, search=False):
         except ValidationError:
             raise AgentProviderError("The response could not be validated. Try again.") from None
     return message, list(sources.values())[:16]
+
+
+def function_tool(name, description, parameters):
+    return {"type": "function", "name": name, "description": description, "parameters": parameters, "strict": False}
+
+
+async def complete(instructions, input_items, tools=None, model=None, max_output_tokens=4000, search=False):
+    payload = {
+        "model": model or settings.AGENT_PLANNER_MODEL,
+        "instructions": instructions + " Use natural punctuation. Avoid em dashes in all user-facing text.",
+        "input": input_items,
+        "store": False,
+        "max_output_tokens": max_output_tokens,
+    }
+    tool_list = list(tools or [])
+    if search:
+        tool_list.append({"type": "web_search"})
+    if tool_list:
+        payload["tools"] = tool_list
+        payload["parallel_tool_calls"] = True
+    result = await _post("responses", json=payload)
+    status = result.get("status")
+    reason = (result.get("incomplete_details") or {}).get("reason")
+    if status not in {"completed", "incomplete"}:
+        raise AgentProviderError("OpenAI could not complete the response. Try again.")
+    output = result.get("output", [])
+    calls = [item for item in output if item.get("type") == "function_call"]
+    fragments, sources = [], {}
+    for item in output:
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content", []):
+            if part.get("type") != "output_text":
+                continue
+            fragments.append(part.get("text", ""))
+            for annotation in part.get("annotations", []):
+                url = annotation.get("url", "")
+                if annotation.get("type") == "url_citation" and urlsplit(url).scheme in {"https", "http"}:
+                    sources[url] = {"url": url, "title": annotation.get("title") or url}
+    if status == "incomplete" and not calls and not fragments:
+        if reason == "max_output_tokens":
+            raise AgentProviderError("The response reached its output limit. Try again with a smaller request.")
+        raise AgentProviderError("OpenAI could not complete the response. Try again.")
+    return {
+        "output": output,
+        "calls": calls,
+        "text": "\n".join(fragments).strip(),
+        "sources": list(sources.values())[:16],
+        "usage": result.get("usage") or {},
+    }
 
 
 async def transcribe(data, name, mime):

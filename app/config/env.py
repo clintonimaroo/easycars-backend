@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     AGENT_ALLOWED_USER_IDS: str = ""
     DOCUMENTS_ADMIN_USER_IDS: str = ""
     AGENT_MODEL: str = "gpt-5-mini"
+    AGENT_PLANNER_MODEL: str = "gpt-5"
+    AGENT_LOOP_ENABLED: bool = True
+    AGENT_MAX_TOOL_STEPS: PositiveInt = 12
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: SecretStr = SecretStr("")
+    TWILIO_FROM_NUMBER: str = ""
     AGENT_TRANSCRIBE_MODEL: str = "gpt-4o-mini-transcribe"
     AGENT_ALLOW_VEHICLE_PHOTO_ANALYSIS: bool = False
     AGENT_ALLOW_PRIVATE_FILE_INPUTS: bool = False

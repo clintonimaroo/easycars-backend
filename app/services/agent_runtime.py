@@ -12,7 +12,7 @@ from pymongo import ReturnDocument
 from typing import Literal
 
 from app.config.env import settings
-from app.services import agent_provider, agent_actions, agent_sales
+from app.services import agent_provider, agent_actions, agent_jobs, agent_loop, agent_memory, agent_sales
 
 logger = logging.getLogger(__name__)
 LEASE = timedelta(seconds=30)
@@ -442,6 +442,29 @@ async def _plan(db, user, turn):
         raise HTTPException(413, "The files in this task add up to more than 150 MB. Start a separate request for the next group.")
     await _persist(db, turn, intent=kind, attachments=submitted, context_attachments=inherited)
 
+    if settings.AGENT_LOOP_ENABLED and kind not in IMPORT_INTENTS | {"inventory_count", "research"}:
+        file_content = []
+        if attachments:
+            if not settings.AGENT_ALLOW_PRIVATE_FILE_INPUTS:
+                raise HTTPException(503, "File reading is disabled until the dealership enables private file processing.")
+            count = len(attachments)
+            await _progress(db, turn, f"Reading {count} {'file' if count == 1 else 'files'}", "I’ll read the attached files.")
+            file_content = await _file_content(db, user, attachments)
+        memory = await db.agent_memory.find_one({"_id": turn["owner"]})
+        request["preferences"] = (memory or {}).get("preferences", "")
+        request["recent_turns"] = [
+            {"request": entry.get("text"), "reply": (entry.get("reply") or "")[:1200], "results": [
+                action["result"] for action in entry.get("actions", []) if action.get("result")
+            ]}
+            for entry in reversed(history[:6])
+        ]
+
+        async def report(stage):
+            await _persist(db, turn, stage=stage)
+
+        reply, sources, actions = await agent_loop.run(db, user, turn, request, history, attachments, file_content, report)
+        return reply, sources, actions, False
+
     if kind == "research":
         query = agent_provider.public_query(intent.query or "")
         photos = [file for file in attachments if file["type"].startswith("image/")]
@@ -707,6 +730,9 @@ async def _execute(db, user, turn):
                 result = await agent_sales.execute_inventory_vehicle(db, user, action["payload"], operation)
             elif action["kind"] == "product":
                 result = await agent_actions.execute_product(db, user, action["payload"], operation)
+            elif action["kind"] == "sms":
+                from app.services import agent_tools
+                result = await agent_tools.execute_sms(action["payload"])
             else:
                 result = await agent_actions.execute_reminder(db, user, action["payload"], operation)
             action.update(status="completed", result=result, error=None)
@@ -749,6 +775,15 @@ async def _process(db, turn):
         reply = "I finished the requested changes."
         await _persist(db, turn, reply=reply, reply_messages=[reply])
     await _settle_turn(db, turn, status)
+    if status in {"completed", "awaiting_approval", "needs_input"} and turn.get("intent") != "inventory_count":
+        try:
+            tail = [
+                {"request": entry.get("text"), "reply": (entry.get("reply") or "")[:600]}
+                for entry in reversed((await _history(db, turn))[:4])
+            ]
+            await agent_memory.update_thread_summary(db, turn["owner"], turn, tail)
+        except Exception as exc:
+            logger.info("Thread summary skipped (%s)", type(exc).__name__)
 
 
 async def _keep_lease(db, claim):
@@ -823,6 +858,11 @@ async def _reminder_loop(db):
             await agent_actions.deliver_due_reminders(db)
         except Exception as exc:
             logger.warning("Agent reminders will retry (%s)", type(exc).__name__)
+        try:
+            if configured():
+                await agent_jobs.run_due_jobs(db)
+        except Exception as exc:
+            logger.warning("Scheduled tasks will retry (%s)", type(exc).__name__)
         await asyncio.sleep(10)
 
 
@@ -830,6 +870,8 @@ async def worker(db):
     await db.agent_turns.create_index([("owner", 1), ("created_at", -1), ("_id", -1)])
     await db.agent_turns.create_index([("status", 1), ("created_at", 1)])
     await agent_actions.ensure_agent_action_indexes(db)
+    await agent_memory.ensure_memory_indexes(db)
+    await agent_jobs.ensure_job_indexes(db)
     reminders = asyncio.create_task(_reminder_loop(db))
     try:
         while True:
