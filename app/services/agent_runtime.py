@@ -19,6 +19,7 @@ LEASE = timedelta(seconds=30)
 LEASE_RENEWAL_SECONDS = 8
 MAX_PLAN_ATTEMPTS = 3
 IMPORT_INTENTS = {"sales", "add_inventory"}
+PRODUCT_INTENTS = {"draft_product", "publish_product"}
 
 
 class LeaseLost(Exception):
@@ -98,9 +99,29 @@ class AddInventoryPlan(Output):
     question: str | None
 
 
+class VehicleFeatures(Output):
+    safety: list[str]
+    wheels: list[str]
+    braking: list[str]
+    seating: list[str]
+    entertainment: list[str]
+    comfort: list[str]
+    lighting: list[str]
+
+
 class Product(Output):
     name: str | None
-    description: str | None
+    overview: list[str]
+    vin: str | None
+    mileage: str | None
+    drivetrain: str | None
+    exterior: str | None
+    interior: str | None
+    mpg: str | None
+    engine: str | None
+    fuel: str | None
+    transmission: str | None
+    features: VehicleFeatures | None
     regular_price: str | None
     sku: str | None
     stock_status: Literal["instock", "outofstock", "onbackorder"] | None
@@ -353,7 +374,9 @@ async def _plan(db, user, turn):
         "If the current message answers an outstanding sales or add_inventory question, choose pending_kind "
         "and set continues_previous to true. A short answer such as a date, price, or contact detail can "
         "continue the original write request. An unrelated request, greeting, cancellation, or new vehicle "
-        "does not continue it. "
+        "does not continue it. A short confirmation, a spec, a color, a price or a publish or draft decision that "
+        "answers an outstanding listing question continues that listing request: choose publish_product when it "
+        "authorizes publishing, otherwise pending_kind, and set continues_previous to true. "
         "Inventory is a read-only lookup of an existing record. A request to add a vehicle is never a lookup. "
         "Inventory_count means count vehicles the user logged, added, or recorded in inventory for a time period. "
         "It does not count sales or vehicles created by other staff. For inventory_count, query is exactly today, "
@@ -368,9 +391,15 @@ async def _plan(db, user, turn):
         and (kind == "chat" or kind in IMPORT_INTENTS)
     ):
         kind = pending_kind
+    product_follow_up = (
+        awaiting_answer and pending_kind in PRODUCT_INTENTS
+        and (kind in PRODUCT_INTENTS or (kind == "chat" and intent.continues_previous))
+    )
+    if product_follow_up:
+        kind = "publish_product" if "publish_product" in {kind, pending_kind} else pending_kind
     if kind == "inventory_count":
         return await _logged_vehicle_reply(db, user, turn, intent.query)
-    continued = bool(intent.continues_previous and awaiting_answer and pending_kind == kind)
+    continued = product_follow_up or bool(intent.continues_previous and awaiting_answer and pending_kind == kind)
     inherited = []
     if turn.get("intent") == kind:
         if "context_attachments" in turn:
@@ -544,16 +573,30 @@ async def _plan(db, user, turn):
             candidates.append(("add_inventory", plan.vehicle.model_dump()))
     elif kind in {"draft_product", "publish_product"}:
         await _persist(db, turn, stage="Preparing the listing")
-        plan = await agent_provider.responses(
-            instructions + " Prepare one website car listing. Name the vehicle accurately. Use only supported features "
-            "and explicitly supplied pricing and availability. Select only vehicle photos explicitly meant for the listing, "
-            "never buyer paperwork, identification, or unrelated images. Preserve the desired cover photo first. "
-            "If asked to publish an existing agent draft, use its exact product ID from the history receipt. "
-            "If an important detail or photo selection is uncertain, ask instead of proposing the action.",
-            content, schema=ProductPlan,
+        listing_guidance = (
+            instructions + " Prepare one complete website car listing from the request, the photos and your own "
+            "knowledge of the vehicle. Name it as year make model trim. Fill every spec you can: read the exterior "
+            "color, wheels, interior color and visible equipment from the photos; take mileage, drivetrain, "
+            "transmission and price from the request; fill engine, fuel type, MPG, transmission and drivetrain from "
+            "the factory specification of that year, make, model and trim when the request does not say. Fill all "
+            "seven feature groups with the standard equipment of that trim plus what the photos show. Write a two "
+            "or three paragraph dealer overview. Leave vin null unless it was supplied, never ask for it. Never ask "
+            "about SKU, stock status, color, transmission, features or the cover photo: leave sku null, use instock, "
+            "infer the rest. Select only vehicle photos for photo_ids and keep the photo the user named as the cover "
+            "first. A request to post, list or put the car on the website is authorization to publish. "
+            "Ask a question only when the year, make or model is unknown, or when publishing without any price. "
+            "If asked to publish an existing agent draft, use its exact product ID from the history receipt."
         )
-        question = plan.question
-        if plan.product is not None and not question:
+        plan = await agent_provider.responses(listing_guidance, content, schema=ProductPlan)
+        answered = awaiting_answer and pending_kind in PRODUCT_INTENTS
+        if plan.question and (plan.product is not None or answered):
+            plan = await agent_provider.responses(
+                listing_guidance + " The dealer has already answered or authorized this. Return the product now with "
+                "question null, using your best inferences for anything not stated.",
+                content, schema=ProductPlan,
+            )
+        question = plan.question if plan.product is None else None
+        if plan.product is not None:
             candidates.append(("product", {**plan.product.model_dump(), "publish": kind == "publish_product"}))
     elif kind == "reminder":
         await _persist(db, turn, stage="Preparing the reminder")

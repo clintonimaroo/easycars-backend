@@ -16,6 +16,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config.env import settings
 from app.models.product import NewProduct
+from app.services.vehicle_template import FEATURE_GROUPS, SHORT_DESCRIPTION, SPECS, listing_summary, render_vehicle_description
 from app.routes.products import (
     MAX_IMAGE_SIZE,
     photo_format,
@@ -186,7 +187,7 @@ def _snapshot(product, *, ignore_images=False):
     return _digest({key: value for key, value in product_fields(product).items() if key not in ignored})
 
 
-def _product_details(product, photos):
+def _product_details(product, photos, specs=None, features=None, overview=None):
     price = product.get("price") or product.get("regular_price")
     stock = product.get("stock_status")
     details = [
@@ -195,8 +196,14 @@ def _product_details(product, photos):
         {"label": "SKU", "value": product.get("sku") or "Generated when saved"},
         {"label": "Stock", "value": STOCK_LABELS.get(stock, "Unset")},
         {"label": "Photos", "value": ", ".join(photos) if photos else "None"},
-        {"label": "Description", "value": _text(product.get("description")) or "None"},
     ]
+    if specs is not None:
+        spec_text, feature_count = listing_summary(specs, features)
+        details.append({"label": "Specs", "value": spec_text or "None"})
+        details.append({"label": "Features", "value": f"{feature_count} listed" if feature_count else "None"})
+        details.append({"label": "Description", "value": " ".join(overview or []) or "None"})
+    else:
+        details.append({"label": "Description", "value": _text(product.get("description")) or "None"})
     if product.get("sale_price"):
         details.append({"label": "Sale price", "value": product["sale_price"]})
     if product.get("catalog_visibility"):
@@ -274,6 +281,19 @@ async def prepare_product(db, user, args, attachments):
         field: args[field] for field in ("name", "description", "regular_price", "sku", "stock_status")
         if args.get(field) is not None
     }
+    specs = {key: args.get(key) for key, _, _ in SPECS if isinstance(args.get(key), str) and args.get(key).strip()}
+    raw_features = args.get("features") if isinstance(args.get("features"), dict) else {}
+    features = {
+        key: [item for item in raw_features.get(key, []) if isinstance(item, str) and item.strip()]
+        for key, _, _ in FEATURE_GROUPS
+    }
+    overview = [line for line in (args.get("overview") or []) if isinstance(line, str) and line.strip()]
+    templated = values.get("name") and "description" not in values and (specs or overview or any(features.values()))
+    if templated:
+        values["description"] = render_vehicle_description(values["name"], specs, features, overview)
+        values["short_description"] = SHORT_DESCRIPTION
+    if values.get("stock_status") is None and templated:
+        values["stock_status"] = "instock"
     try:
         fields = NewProduct.model_validate(values, strict=True).model_dump(exclude_unset=True)
     except ValidationError:
@@ -296,8 +316,8 @@ async def prepare_product(db, user, args, attachments):
         for photo_id in photo_ids:
             photo = await _photo_record(db, owner, photo_id)
             filenames.append(photo.get("metadata", {}).get("name") or photo.get("filename") or "Vehicle photo")
-    details = _product_details(fields, filenames)
-    if fields.get("description"):
+    details = _product_details(fields, filenames, specs if templated else None, features if templated else None, overview if templated else None)
+    if fields.get("description") and not templated:
         fields["description"] = "<p>" + escape(fields["description"].strip()).replace("\n", "<br>") + "</p>"
     return {
         "title": f"{'Publish' if publish else 'Draft'} {fields['name']}",
