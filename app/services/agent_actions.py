@@ -472,14 +472,15 @@ def _product_matches(product, fields, sku):
     return _amount(product.get("regular_price")) == _amount(fields.get("regular_price"))
 
 
-async def _finish_listing(client, product, marker, publish, media_ids=None):
+async def _finish_listing(client, product, marker, publish, media_ids=None, owned=()):
     current_status = product.get("status")
     if current_status != "draft" and not (current_status == "publish" and publish):
         raise HTTPException(409, "This listing changed in Products. Review it before continuing.")
     changes = {}
     if media_ids is not None:
         existing = [image["id"] for image in product_fields(product)["images"] if "id" in image]
-        if (existing or current_status == "publish") and existing != media_ids:
+        foreign = [image_id for image_id in existing if image_id not in set(owned) | set(media_ids)]
+        if foreign and existing != media_ids:
             raise HTTPException(409, "The draft gallery changed in Products. Review it before continuing.")
         if media_ids != existing:
             changes["images"] = [{"id": media_id} for media_id in media_ids]
@@ -495,9 +496,9 @@ async def _finish_listing(client, product, marker, publish, media_ids=None):
             raise
         updated = await _get_product(client, product["id"], marker)
         if (updated.get("status") != changes.get("status", current_status)
-                or ("images" in changes and [image.get("id") for image in product_fields(updated)["images"]] != media_ids)):
+                or ("images" in changes and set(image.get("id") for image in product_fields(updated)["images"]) != set(media_ids))):
             raise error
-    if media_ids is not None and [image.get("id") for image in product_fields(updated)["images"]] != media_ids:
+    if media_ids is not None and set(image.get("id") for image in product_fields(updated)["images"]) != set(media_ids):
         raise HTTPException(502, "WooCommerce did not confirm the listing photos.")
     return updated
 
@@ -548,12 +549,15 @@ async def execute_product(db, user, payload, operation_id):
                 product = await _get_product(client, product["id"], key)
                 if _snapshot(product, ignore_images=True) != operation["draft_snapshot"]:
                     raise HTTPException(409, "The draft changed in Products. Review it before continuing.")
-                product = await _finish_listing(client, product, key, False, media_ids)
+                operation = await collection.find_one({"_id": key})
+                owned = list((operation.get("media") or {}).values())
+                product = await _finish_listing(client, product, key, False, media_ids, owned)
                 if publish:
                     product = await _get_product(client, product["id"], key)
                     if _snapshot(product, ignore_images=True) != operation["draft_snapshot"]:
                         raise HTTPException(409, "The draft changed in Products. Review it before continuing.")
-                    if [image.get("id") for image in product_fields(product)["images"]] != media_ids:
+                    gallery = [image.get("id") for image in product_fields(product)["images"]]
+                    if gallery != media_ids and any(image_id not in set(owned) | set(media_ids) for image_id in gallery):
                         raise HTTPException(409, "The draft gallery changed in Products. Review it before continuing.")
             else:
                 media_ids = [operation.get("media", {}).get(photo_id) for photo_id in payload["photo_ids"]]
