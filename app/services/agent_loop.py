@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from uuid import uuid4
 
@@ -25,8 +26,18 @@ INSTRUCTIONS = (
     "app reports it. Do not ask for government ID, Social Security or payment details. "
     "Replies: plain Markdown that is easy to scan, short paragraphs, one item per line in a list, bold key values, "
     "no em dashes, no run of numbered items in one sentence. Name photos by file name and what they show, never by "
-    "attachment id. When you finish an action, say in one or two sentences what you prepared and what happens next."
+    "attachment id. Never show internal identifiers (action ids, job ids, attachment ids, UUIDs) to the dealer. "
+    "When you finish an action, say in one or two sentences what you prepared; the app shows the result card and "
+    "its status itself, so do not promise to report back, check in, or follow up later, and do not add a section "
+    "about what happens next."
 )
+
+
+UUID_PATTERN = re.compile(r"\s*\(?(?:action|job|attachment|task)?\s*id:?\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)?", re.I)
+
+
+def clean_reply(text):
+    return UUID_PATTERN.sub("", text or "").strip()
 
 
 def _photo_lines(attachments):
@@ -106,4 +117,4 @@ async def run(db, user, turn, request, history, attachments, file_content, progr
     if not text:
         raise HTTPException(502, "The agent could not produce a reply. Try again.")
     merged = {source["url"]: source for source in [*sources, *ctx.sources]}
-    return text, list(merged.values())[:16], actions
+    return clean_reply(text), list(merged.values())[:16], actions

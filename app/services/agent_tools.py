@@ -149,7 +149,7 @@ async def _propose_listing(ctx, args):
     proposal = await agent_actions.prepare_product(ctx.db, ctx.user, payload, ctx.attachments)
     action = await ctx.propose("product", proposal)
     return {
-        "proposed": True, "action_id": action["id"], "title": proposal["title"],
+        "proposed": True, "title": proposal["title"],
         "runs": "automatically" if action["status"] == "queued" else "after the dealer approves it",
     }
 
@@ -159,7 +159,7 @@ async def _propose_reminder(ctx, args):
         "lot_url": args.get("lot_url"), "remind_at": args.get("remind_at"), "label": args.get("label"),
     })
     action = await ctx.propose("reminder", proposal)
-    return {"proposed": True, "action_id": action["id"], "title": proposal["title"]}
+    return {"proposed": True, "title": proposal["title"]}
 
 
 async def _schedule_task(ctx, args):
@@ -168,7 +168,7 @@ async def _schedule_task(ctx, args):
         "name": args.get("name"), "prompt": args.get("prompt"), "schedule": args.get("schedule"),
         "timezone": args.get("timezone") or ctx.turn.get("timezone") or "UTC", "auto_approve": bool(ctx.turn.get("auto_approve")),
     })
-    return {"scheduled": True, "job": job}
+    return {"scheduled": True, "task": job.get("name"), "schedule": job.get("schedule_text") or job.get("schedule"), "next_run": job.get("next_run_at")}
 
 
 async def _list_tasks(ctx, args):
@@ -188,7 +188,7 @@ async def _send_sms(ctx, args):
         "payload": {"to": to, "body": body},
     }
     action = await ctx.propose("sms", proposal)
-    return {"proposed": True, "action_id": action["id"]}
+    return {"proposed": True, "to": to}
 
 
 async def execute_sms(payload):
