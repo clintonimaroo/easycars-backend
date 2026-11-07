@@ -16,7 +16,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config.env import settings
 from app.models.product import NewProduct
-from app.services.vehicle_template import FEATURE_GROUPS, SHORT_DESCRIPTION, SPECS, listing_summary, render_vehicle_description
+from app.services.vehicle_template import FEATURE_GROUPS, SHORT_DESCRIPTION, SPECS, render_vehicle_description
 from app.routes.products import (
     MAX_IMAGE_SIZE,
     photo_format,
@@ -198,10 +198,13 @@ def _product_details(product, photos, specs=None, features=None, overview=None):
         {"label": "Photos", "value": ", ".join(photos) if photos else "None"},
     ]
     if specs is not None:
-        spec_text, feature_count = listing_summary(specs, features)
-        details.append({"label": "Specs", "value": spec_text or "None"})
-        details.append({"label": "Features", "value": f"{feature_count} listed" if feature_count else "None"})
-        details.append({"label": "Description", "value": " ".join(overview or []) or "None"})
+        details.append({"label": "Specs", "value": [
+            {"label": label, "value": specs[key]} for key, label, _ in SPECS if specs.get(key)
+        ]})
+        details.append({"label": "Features", "value": [
+            {"label": label, "value": features.get(key, [])} for key, label, _ in FEATURE_GROUPS if features.get(key)
+        ]})
+        details.append({"label": "Description", "value": list(overview or [])})
     else:
         details.append({"label": "Description", "value": _text(product.get("description")) or "None"})
     if product.get("sale_price"):
@@ -335,12 +338,14 @@ async def prepare_product(db, user, args, attachments):
             photo = await _photo_record(db, owner, photo_id)
             filenames.append(photo.get("metadata", {}).get("name") or photo.get("filename") or "Vehicle photo")
     details = _product_details(fields, filenames, specs if templated else None, features if templated else None, overview if templated else None)
+    media = {"photos": [{"id": photo_id, "name": name} for photo_id, name in zip(photo_ids, filenames)]}
     if fields.get("description") and not templated:
         fields["description"] = "<p>" + escape(fields["description"].strip()).replace("\n", "<br>") + "</p>"
     return {
         "title": f"{'Publish' if publish else 'Draft'} {fields['name']}",
         "summary": "Create a WooCommerce draft and publish it." if publish else "Save a draft in Products.",
         "details": details,
+        "media": media,
         "payload": {"store": store, "fields": fields, "photo_ids": photo_ids, "publish": publish},
     }
 

@@ -200,16 +200,6 @@ def stage_for(status):
     }[status]
 
 
-def _explicit_publish_request(value):
-    direct = re.search(
-        r"(?:^|[.!?;]\s*|\b(?:please|go ahead and|then|and)\s+)"
-        r"(?:publish\b|make\b[^.!?;]{0,80}\blive\b|post\b[^.!?;]{0,80}\b(?:website|store)\b)",
-        value.strip(), re.I,
-    )
-    withheld = re.search(r"\b(?:don['’]t|do not|never|without|before|if|unless|until|draft only|review first)\b", value, re.I)
-    return direct is not None and withheld is None
-
-
 def _claim_filter(turn):
     return {"_id": turn["_id"], "lease_id": turn["lease_id"], "status": "running"}
 
@@ -666,9 +656,6 @@ async def _plan(db, user, turn):
                 continue
             raise
         automatic = turn["auto_approve"]
-        if action_kind == "product" and args["publish"]:
-            original = previous.get("text", "") if continued else ""
-            automatic = automatic and _explicit_publish_request(original or turn["text"])
         actions.append({
             **proposal,
             "id": str(uuid4()),

@@ -145,7 +145,7 @@ def _present(turn, previous=None):
         if value is not None and value.tzinfo is None:
             result[field] = value.isoformat() + "Z"
     result["actions"] = [
-        {field: action.get(field) for field in ("id", "title", "summary", "details", "status", "result", "error", "started")}
+        {field: action.get(field) for field in ("id", "title", "summary", "details", "media", "status", "result", "error", "started")}
         for action in turn.get("actions", [])
     ]
     return result

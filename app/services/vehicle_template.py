@@ -91,11 +91,3 @@ def render_vehicle_description(name, specs=None, features=None, overview=None):
         f'<p style="margin:24px 0 0;font-size:14px;line-height:1.7;">{PHONE_LINE}</p>\n'
         "</div>"
     )
-
-
-def listing_summary(specs=None, features=None):
-    specs = specs or {}
-    features = features or {}
-    spec_text = ", ".join(f"{label}: {_clean(specs.get(key))}" for key, label, _ in SPECS if _clean(specs.get(key)))
-    feature_count = sum(len(_lines(features.get(key))) for key, _, _ in FEATURE_GROUPS)
-    return spec_text, feature_count
