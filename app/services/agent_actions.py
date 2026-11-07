@@ -317,9 +317,14 @@ async def prepare_product(db, user, args, attachments):
             raise HTTPException(422, "Use a SKU without commas.")
     photo_ids = args.get("photo_ids", [])
     allowed = {str(item.get("id") or item.get("_id")) for item in attachments}
-    if (not isinstance(photo_ids, list) or len(photo_ids) > 50
-            or any(not isinstance(photo_id, str) or photo_id not in allowed for photo_id in photo_ids)):
-        raise HTTPException(422, "Choose vehicle photos from your attachments.")
+    images = [str(item.get("id") or item.get("_id")) for item in attachments if str(item.get("type", "")).startswith("image/")]
+    if not isinstance(photo_ids, list):
+        photo_ids = []
+    photo_ids = [photo_id for photo_id in photo_ids if isinstance(photo_id, str) and photo_id in allowed][:50]
+    if not photo_ids and images:
+        photo_ids = images
+    if not photo_ids and images == [] and publish:
+        raise HTTPException(422, "Attach at least one vehicle photo so I can publish the listing.")
     photo_ids = list(dict.fromkeys(photo_ids))
     if publish:
         _validate_publish(fields, photo_ids)

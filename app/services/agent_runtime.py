@@ -327,6 +327,11 @@ def _copart_watch_lot(message):
     return next(iter(lots)) if len(lots) == 1 else None
 
 
+def _is_question(message):
+    text = " ".join((message or "").lower().split())
+    return text.endswith("?") or bool(re.match(r"^(what|why|how|which|who|when|where|do you|did you|can you|could you|is it|are you)\b", text))
+
+
 def _add_vehicle_request(message):
     return bool(re.fullmatch(
         r"(?:please\s+)?(?:add|create|put|log)\s+(?:(?:a|the|this|that|new)\s+)*(?:car|vehicle|it)"
@@ -399,7 +404,7 @@ async def _plan(db, user, turn):
     ):
         kind = pending_kind
     product_follow_up = (
-        awaiting_answer and pending_kind in PRODUCT_INTENTS
+        awaiting_answer and pending_kind in PRODUCT_INTENTS and not _is_question(turn["text"])
         and (kind in PRODUCT_INTENTS or (kind == "chat" and intent.continues_previous))
     )
     if product_follow_up:
@@ -417,6 +422,13 @@ async def _plan(db, user, turn):
     if continued:
         seen = {item["id"] for item in submitted}
         previous_files = [*previous.get("context_attachments", []), *previous.get("attachments", [])]
+        if not previous_files and kind in PRODUCT_INTENTS:
+            for entry in history[1:]:
+                if entry.get("intent") not in PRODUCT_INTENTS | {"chat"}:
+                    break
+                previous_files = [*entry.get("context_attachments", []), *entry.get("attachments", [])]
+                if previous_files:
+                    break
         inherited = [item for item in previous_files if item["id"] not in seen]
     elif direct_add and not submitted:
         mistaken_lookup = (
@@ -645,7 +657,10 @@ async def _plan(db, user, turn):
                 proposal = await agent_actions.prepare_reminder(db, user, args)
         except HTTPException as exc:
             if exc.status_code in {400, 404, 409, 422}:
-                errors.append(str(exc.detail))
+                detail = str(exc.detail)
+                if action_kind == "product":
+                    detail = f"I couldn't prepare the listing yet. {detail} Tell me the fix and I'll try again."
+                errors.append(detail)
                 if action_kind in {"sale", "add_inventory"}:
                     unresolved.append({"kind": action_kind, "fields": args})
                 continue
