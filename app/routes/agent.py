@@ -129,6 +129,7 @@ def _present(turn, previous=None):
     )
     result = {field: turn.get(field) for field in fields}
     result["attachments"] = agent_runtime.submitted_attachments(turn, previous)
+    result["context_attachments"] = turn.get("context_attachments", [])
     result["reply"] = agent_runtime.clean_reply(result["reply"])
     result["reply_messages"] = turn.get("reply_messages", [result["reply"]] if result["reply"] else [])
     result["progress_messages"] = turn.get("progress_messages", [])
