@@ -281,6 +281,19 @@ async def prepare_product(db, user, args, attachments):
         field: args[field] for field in ("name", "description", "regular_price", "sku", "stock_status")
         if args.get(field) is not None
     }
+    if isinstance(values.get("regular_price"), (int, float)) and not isinstance(values["regular_price"], bool):
+        values["regular_price"] = f"{values['regular_price']:.2f}".rstrip("0").rstrip(".")
+    if isinstance(values.get("regular_price"), str):
+        price = re.sub(r"[^0-9.]", "", values["regular_price"].replace(",", ""))
+        if price.count(".") > 1:
+            price = price.replace(".", "", price.count(".") - 1)
+        values["regular_price"] = price.rstrip(".") if price not in {"", "."} else values["regular_price"].strip()
+    if isinstance(values.get("name"), str):
+        values["name"] = " ".join(values["name"].split())[:500]
+    if isinstance(values.get("sku"), str) and not values["sku"].strip():
+        values.pop("sku")
+    if values.get("stock_status") not in STOCK_LABELS:
+        values.pop("stock_status", None)
     specs = {key: args.get(key) for key, _, _ in SPECS if isinstance(args.get(key), str) and args.get(key).strip()}
     raw_features = args.get("features") if isinstance(args.get("features"), dict) else {}
     features = {
