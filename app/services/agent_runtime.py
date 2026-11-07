@@ -12,7 +12,7 @@ from pymongo import ReturnDocument
 from typing import Literal
 
 from app.config.env import settings
-from app.services import agent_provider, agent_actions, agent_jobs, agent_loop, agent_memory, agent_sales
+from app.services import agent_provider, agent_actions, agent_jobs, agent_loop, agent_memory, agent_sales, agent_threads
 
 logger = logging.getLogger(__name__)
 LEASE = timedelta(seconds=30)
@@ -241,8 +241,11 @@ def _payload_for_turn(turn):
 
 
 async def _history(db, turn):
+    scope = {"owner": turn["owner"], "created_at": {"$lt": turn["created_at"]}}
+    if turn.get("thread_id"):
+        scope["thread_id"] = turn["thread_id"]
     return await db.agent_turns.find(
-        {"owner": turn["owner"], "created_at": {"$lt": turn["created_at"]}},
+        scope,
         {"text": 1, "reply": 1, "status": 1, "created_at": 1, "attachments": 1, "context_attachments": 1,
          "actions.result": 1, "intent": 1, "needs_input": 1, "pending_import": 1},
     ).sort([("created_at", -1), ("_id", -1)]).to_list(12)
@@ -875,6 +878,7 @@ async def worker(db):
     await agent_actions.ensure_agent_action_indexes(db)
     await agent_memory.ensure_memory_indexes(db)
     await agent_jobs.ensure_job_indexes(db)
+    await agent_threads.ensure_indexes(db)
     reminders = asyncio.create_task(_reminder_loop(db))
     try:
         while True:

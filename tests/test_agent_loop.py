@@ -10,7 +10,7 @@ async def test_loop_calls_tools_until_a_final_reply(monkeypatch):
     calls = []
     audits = []
 
-    async def summary(db, owner):
+    async def summary(db, owner, thread_id=None):
         return "", None
 
     async def facts(db, owner, limit=24):

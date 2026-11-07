@@ -99,13 +99,18 @@ async def recent_facts(db, owner, limit=24):
     return [_view(item) async for item in cursor]
 
 
-async def thread_summary(db, owner):
-    record = await db[SUMMARIES].find_one({"_id": owner})
+def _summary_key(owner, thread_id):
+    return f"{owner}:{thread_id}" if thread_id else owner
+
+
+async def thread_summary(db, owner, thread_id=None):
+    record = await db[SUMMARIES].find_one({"_id": _summary_key(owner, thread_id)})
     return (record or {}).get("summary", ""), (record or {}).get("through")
 
 
 async def update_thread_summary(db, owner, turn, history_tail):
-    previous, _ = await thread_summary(db, owner)
+    thread_id = turn.get("thread_id")
+    previous, _ = await thread_summary(db, owner, thread_id)
     exchange = {
         "previous_summary": previous,
         "latest_request": turn.get("text", ""),
@@ -124,7 +129,7 @@ async def update_thread_summary(db, owner, turn, history_tail):
         agent_provider.text_content(exchange), model=settings.AGENT_MODEL,
     )
     await db[SUMMARIES].update_one(
-        {"_id": owner}, {"$set": {"summary": summary.strip()[:2000], "through": turn.get("id"), "updated_at": now()}}, upsert=True,
+        {"_id": _summary_key(owner, thread_id)}, {"$set": {"summary": summary.strip()[:2000], "through": turn.get("id"), "updated_at": now()}}, upsert=True,
     )
     return summary
 

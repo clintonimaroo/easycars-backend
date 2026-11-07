@@ -22,7 +22,7 @@ from app.routes.products import has_private_signing_key
 import asyncio
 import json
 
-from app.services import agent_jobs, agent_memory, agent_provider, agent_runtime
+from app.services import agent_jobs, agent_memory, agent_provider, agent_runtime, agent_threads
 from app.utils.mongodb import get_async_database
 
 router = APIRouter()
@@ -61,8 +61,13 @@ class ReplyReference(AgentInput):
     text: str = Field(max_length=600)
 
 
+class ThreadInput(AgentInput):
+    title: str = Field(max_length=120)
+
+
 class TurnInput(AgentInput):
     id: UUID
+    thread_id: str | None = Field(None, max_length=80)
     text: str = Field(max_length=8000)
     attachment_ids: list[str] = Field(max_length=50)
     auto_approve: bool
@@ -136,7 +141,7 @@ def _present(turn, previous=None):
     fields = (
         "id", "text", "auto_approve", "status", "stage", "attachments", "reply", "sources", "error",
         "created_at", "work_started_at", "work_finished_at", "search_query", "reaction", "suggested_reply", "reply_to",
-        "job_id", "job_name",
+        "job_id", "job_name", "thread_id",
     )
     result = {field: turn.get(field) for field in fields}
     result["attachments"] = agent_runtime.submitted_attachments(turn, previous)
@@ -159,17 +164,60 @@ async def _present_after_write(db, turn):
     previous = None
     if "context_attachments" not in turn and turn.get("attachments") and turn.get("intent"):
         previous = await db.agent_turns.find_one(
-            {"owner": turn["owner"], "created_at": {"$lt": turn["created_at"]}},
+            {"owner": turn["owner"], "created_at": {"$lt": turn["created_at"]}, **({"thread_id": turn["thread_id"]} if turn.get("thread_id") else {})},
             {"attachments": 1, "context_attachments": 1, "intent": 1, "status": 1},
             sort=[("created_at", -1), ("_id", -1)],
         )
     return _present(turn, previous)
 
 
+@router.get("/threads")
+async def read_threads(user=Depends(_agent_user), db=Depends(get_async_database)):
+    owner = str(user["_id"])
+    threads = await agent_threads.list_threads(db, owner)
+    if not threads:
+        threads = [agent_threads.view(await agent_threads.create(db, owner))]
+    return {"threads": threads}
+
+
+@router.post("/threads", dependencies=[Depends(_write_header)])
+async def create_thread(user=Depends(_agent_user), db=Depends(get_async_database)):
+    owner = str(user["_id"])
+    empty = await db[agent_threads.THREADS].find_one({"owner": owner, "preview": ""}, sort=[("created_at", -1)])
+    if empty and not await db.agent_turns.find_one({"owner": owner, "thread_id": empty["_id"]}, {"_id": 1}):
+        return {"thread": agent_threads.view(empty)}
+    return {"thread": agent_threads.view(await agent_threads.create(db, owner))}
+
+
+@router.patch("/threads/{thread_id}", dependencies=[Depends(_write_header)])
+async def rename_thread(thread_id: str, body: ThreadInput, user=Depends(_agent_user), db=Depends(get_async_database)):
+    if not agent_threads.valid_id(thread_id) or not await agent_threads.rename(db, str(user["_id"]), thread_id, body.title):
+        raise HTTPException(404, "That chat could not be found.")
+    return {"thread": agent_threads.view(await agent_threads.get(db, str(user["_id"]), thread_id))}
+
+
+@router.delete("/threads/{thread_id}", dependencies=[Depends(_write_header)])
+async def delete_thread(thread_id: str, user=Depends(_agent_user), db=Depends(get_async_database)):
+    owner = str(user["_id"])
+    if not agent_threads.valid_id(thread_id):
+        raise HTTPException(404, "That chat could not be found.")
+    active = await db.agent_turns.find_one({"owner": owner, "thread_id": thread_id, "status": {"$in": ["queued", "running"]}}, {"_id": 1})
+    if active:
+        raise HTTPException(409, "Wait for the agent to finish in this chat before deleting it.")
+    if not await agent_threads.remove(db, owner, thread_id):
+        raise HTTPException(404, "That chat could not be found.")
+    return {"deleted": True}
+
+
 @router.get("")
-async def read_agent(before: UUID | None = Query(None), user=Depends(_agent_user), db=Depends(get_async_database)):
+async def read_agent(before: UUID | None = Query(None), thread: str | None = Query(None, max_length=80),
+                     user=Depends(_agent_user), db=Depends(get_async_database)):
     owner = str(user["_id"])
     query = {"owner": owner}
+    if thread is not None:
+        if not await agent_threads.get(db, owner, thread):
+            raise HTTPException(404, "That chat could not be found.")
+        query["thread_id"] = thread
     if before is not None:
         cursor = await db.agent_turns.find_one({"_id": _key(user, before)}, {"created_at": 1})
         if not cursor:
@@ -425,17 +473,23 @@ async def create_turn(body: TurnInput, user=Depends(_agent_user), db=Depends(get
         if not referenced:
             raise HTTPException(404, "The message you are replying to could not be found.")
         reply_to = {"turn_id": body.reply_to.turn_id, "role": body.reply_to.role, "text": " ".join(body.reply_to.text.split())[:600]}
+    thread_id = body.thread_id
+    if thread_id is not None and not await agent_threads.get(db, owner, thread_id):
+        raise HTTPException(404, "That chat could not be found.")
+    if thread_id is None:
+        thread_id = (await agent_threads.latest(db, owner))["_id"]
     created_at = agent_runtime.now()
     turn = await db.agent_turns.find_one_and_update(
         {"_id": key},
         {"$setOnInsert": {
-            "owner": owner, "id": str(body.id), "text": text, "timezone": body.timezone, "reply_to": reply_to,
+            "owner": owner, "id": str(body.id), "thread_id": thread_id, "text": text, "timezone": body.timezone, "reply_to": reply_to,
             "attachments": attachments, "context_attachments": [], "auto_approve": body.auto_approve, "created_at": created_at,
             "work_started_at": created_at, "work_finished_at": None,
             "status": "queued", "stage": "Queued", "attempts": 0, "actions": [], "reply": "", "sources": [],
         }},
         upsert=True, return_document=ReturnDocument.AFTER,
     )
+    await agent_threads.touch(db, owner, thread_id, text)
     return {"turn": await _present_after_write(db, turn)}
 
 

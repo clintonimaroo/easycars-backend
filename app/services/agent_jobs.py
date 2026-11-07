@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import HTTPException
 from pymongo import ReturnDocument
 
+from app.services import agent_threads
+
 logger = logging.getLogger(__name__)
 JOBS = "agent_jobs"
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -208,8 +210,9 @@ async def run_due_jobs(db):
             return
         upcoming = next_run(job["schedule"], job["timezone"], after=current)
         turn_id = str(uuid4())
+        thread = await agent_threads.latest(db, job["owner"])
         turn = {
-            "_id": f"{job['owner']}:{turn_id}", "owner": job["owner"], "id": turn_id,
+            "_id": f"{job['owner']}:{turn_id}", "owner": job["owner"], "id": turn_id, "thread_id": thread["_id"],
             "text": job["prompt"], "timezone": job["timezone"], "reply_to": None, "job_id": job["id"], "job_name": job["name"],
             "attachments": [], "context_attachments": [], "auto_approve": job.get("auto_approve", False),
             "created_at": current, "work_started_at": current, "work_finished_at": None,
@@ -217,6 +220,7 @@ async def run_due_jobs(db):
         }
         try:
             await db.agent_turns.insert_one(turn)
+            await agent_threads.touch(db, job["owner"], thread["_id"], job["prompt"])
         except Exception as exc:
             logger.warning("Scheduled task turn could not be queued (%s)", type(exc).__name__)
         await db[JOBS].update_one(

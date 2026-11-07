@@ -63,7 +63,7 @@ def _photo_lines(attachments):
 
 async def run(db, user, turn, request, history, attachments, file_content, progress):
     owner = str(user["_id"])
-    summary, _ = await agent_memory.thread_summary(db, owner)
+    summary, _ = await agent_memory.thread_summary(db, owner, turn.get("thread_id"))
     notes = await agent_memory.recent_facts(db, owner, limit=24)
     context = {
         **request,
