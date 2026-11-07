@@ -448,7 +448,7 @@ async def _plan(db, user, turn):
             if not settings.AGENT_ALLOW_PRIVATE_FILE_INPUTS:
                 raise HTTPException(503, "File reading is disabled until the dealership enables private file processing.")
             count = len(attachments)
-            await _progress(db, turn, f"Reading {count} {'file' if count == 1 else 'files'}", "I’ll read the attached files.")
+            await _persist(db, turn, stage=f"Reading {count} {'file' if count == 1 else 'files'}")
             file_content = await _file_content(db, user, attachments)
         memory = await db.agent_memory.find_one({"_id": turn["owner"]})
         request["preferences"] = (memory or {}).get("preferences", "")
@@ -459,8 +459,11 @@ async def _plan(db, user, turn):
             for entry in reversed(history[:6])
         ]
 
-        async def report(stage):
-            await _persist(db, turn, stage=stage)
+        async def report(stage, message=None):
+            if message:
+                await _progress(db, turn, stage, message)
+            else:
+                await _persist(db, turn, stage=stage)
 
         reply, sources, actions = await agent_loop.run(db, user, turn, request, history, attachments, file_content, report)
         return reply, sources, actions, False

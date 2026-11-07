@@ -49,7 +49,7 @@ async def test_loop_calls_tools_until_a_final_reply(monkeypatch):
     monkeypatch.setattr(agent_loop.agent_provider, "complete", complete)
     stages = []
 
-    async def progress(stage):
+    async def progress(stage, message=None):
         stages.append(stage)
 
     turn = {"id": "t1", "auto_approve": True, "timezone": "UTC"}
