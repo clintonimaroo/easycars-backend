@@ -65,6 +65,32 @@ async def get_current_user(request: Request, token: Optional[str] = Depends(oaut
     logger.info(f"User authenticated: {user.get('username')}")
     return user
 
+def issue_session(response: Response, user: Dict) -> Dict:
+    token_data = {
+        "id": str(user.get("_id")),
+        "username": user.get("username"),
+        "role": user.get("role")
+    }
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    access_token = create_access_token(token_data, expires_delta=timedelta(seconds=expires_in))
+    is_production = settings.ENVIRONMENT == "production"
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        max_age=expires_in,
+        path="/",
+        domain=".easycarsllc.com" if is_production else None,
+        secure=is_production,
+        httponly=is_production,
+        samesite="none" if is_production else "lax"
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": expires_in,
+        "user": UserModel.format_user_response(user)
+    }
+
 @router.post("/register", response_model=Dict)
 async def register(user_data: UserCreate):
     """
@@ -106,40 +132,28 @@ async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depen
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Create JWT token
-    token_data = {
-        "id": str(user.get("_id")),
-        "username": user.get("username"),
-        "role": user.get("role")
-    }
-    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    access_token = create_access_token(token_data, expires_delta=timedelta(seconds=expires_in))
-    logger.info(f"Access token created for user: {user.get('username')}")
-    
-    # Set cookie in the response
+    response.headers["Cache-Control"] = "no-store"
+    logger.info(f"Login successful for user: {user.get('username')}")
+    return issue_session(response, user)
+
+@router.post("/refresh")
+async def refresh_session(response: Response, current_user: Dict = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    return issue_session(response, current_user)
+
+@router.post("/logout")
+async def logout(response: Response):
     is_production = settings.ENVIRONMENT == "production"
-    cookie_domain = ".easycarsllc.com" if is_production else None
-    response.set_cookie(
+    response.delete_cookie(
         key="auth_token",
-        value=access_token,
-        max_age=expires_in,
         path="/",
-        domain=cookie_domain,
+        domain=".easycarsllc.com" if is_production else None,
         secure=is_production,
         httponly=is_production,
-        samesite="none" if is_production else "lax"
+        samesite="none" if is_production else "lax",
     )
-    
     response.headers["Cache-Control"] = "no-store"
-    user_response = UserModel.format_user_response(user)
-    logger.info(f"Login successful for user: {user.get('username')}")
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": expires_in,
-        "user": user_response
-    }
+    return {"success": True}
 
 @router.get("/verify", response_model=Dict)
 async def verify_token(token: str):

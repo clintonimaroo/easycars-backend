@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # JWT Authentication
     SECRET_KEY: str = Field(min_length=1)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: PositiveInt = 480
+    ACCESS_TOKEN_EXPIRE_MINUTES: PositiveInt = 43200
     
     # For Migration
     MONGODB_SOURCE_URI: str = ""
