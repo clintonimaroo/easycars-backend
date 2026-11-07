@@ -185,6 +185,7 @@ async def complete(instructions, input_items, tools=None, model=None, max_output
     if tool_list:
         payload["tools"] = tool_list
         payload["parallel_tool_calls"] = True
+        payload["include"] = ["reasoning.encrypted_content"]
     result = await _post("responses", json=payload)
     status = result.get("status")
     reason = (result.get("incomplete_details") or {}).get("reason")
