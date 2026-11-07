@@ -1,4 +1,5 @@
 from hashlib import sha256
+import logging
 import re
 from pathlib import PurePath
 from typing import Annotated
@@ -51,6 +52,8 @@ async def get_store_client():
         yield client
 
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(dependencies=[Depends(require_products_access)])
 StoreClient = Annotated[httpx.AsyncClient, Depends(get_store_client)]
 ProductId = Annotated[int, Path(gt=0)]
@@ -98,7 +101,17 @@ def store_error(response: httpx.Response):
             error = None
         if isinstance(error, dict) and error.get("code") in ("product_invalid_sku", "woocommerce_rest_product_invalid_sku"):
             raise HTTPException(422, "WooCommerce rejected this SKU. Check whether another listing already uses it.")
-        raise HTTPException(422, "WordPress could not accept the submitted data. Check the listing fields or photo format.")
+        reason = ""
+        if isinstance(error, dict):
+            message = error.get("message")
+            code = error.get("code")
+            params = (error.get("data") or {}).get("params") if isinstance(error.get("data"), dict) else None
+            parts = [str(part) for part in (code, message) if part]
+            if isinstance(params, dict):
+                parts.extend(f"{key}: {value}" for key, value in list(params.items())[:4])
+            reason = re.sub(r"<[^>]+>", "", " | ".join(parts))[:240]
+        logger.warning("WordPress rejected a store request (%s): %s", response.status_code, reason or response.text[:240])
+        raise HTTPException(422, f"WordPress could not accept the submitted data. {reason}" if reason else "WordPress could not accept the submitted data. Check the listing fields or photo format.")
     raise HTTPException(502, "WordPress could not complete the request.")
 
 
