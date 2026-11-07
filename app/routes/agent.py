@@ -55,7 +55,7 @@ class AgentInput(BaseModel):
 class TurnInput(AgentInput):
     id: UUID
     text: str = Field(max_length=8000)
-    attachment_ids: list[str] = Field(max_length=7)
+    attachment_ids: list[str] = Field(max_length=50)
     auto_approve: bool
     timezone: str = Field(max_length=64)
 

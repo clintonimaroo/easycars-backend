@@ -400,8 +400,8 @@ async def _plan(db, user, turn):
             }.values())
     inherited = await _drop_resent_files(db, inherited, submitted)
     attachments = inherited + submitted
-    if inherited and (len(attachments) > 7 or sum(item["size"] for item in attachments) > 45 * 1024 * 1024):
-        raise HTTPException(413, "This task has too many files. Start a separate request for the next group.")
+    if inherited and sum(item["size"] for item in attachments) > 150 * 1024 * 1024:
+        raise HTTPException(413, "The files in this task add up to more than 150 MB. Start a separate request for the next group.")
     await _persist(db, turn, intent=kind, attachments=submitted, context_attachments=inherited)
 
     if kind == "research":
